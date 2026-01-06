@@ -2,8 +2,7 @@ import SwiftUI
 
 // MARK: - Main Content View (Chat Window)
 struct ContentView: View {
-    @StateObject private var viewModel = ChatViewModel()
-    @EnvironmentObject var appState: AppState
+    @ObservedObject private var viewModel = SharedChatViewModel.shared.viewModel
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showSettings = false
     @FocusState private var isInputFocused: Bool
@@ -70,6 +69,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .environmentObject(AppState.shared)
         .frame(width: 1100, height: 750)
 }

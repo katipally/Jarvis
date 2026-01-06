@@ -122,9 +122,17 @@ struct SidebarView: View {
         }
     }
     
+    /// Groups conversations by time period, sorted by last message interaction time
     private var groupedConversations: [(String, [Conversation])] {
         let calendar = Calendar.current
         let now = Date()
+        
+        // Sort conversations by last message time (most recent interaction first)
+        let sortedConversations = viewModel.filteredConversations.sorted { conv1, conv2 in
+            let lastMessage1 = conv1.messages.last?.createdAt ?? conv1.updatedAt
+            let lastMessage2 = conv2.messages.last?.createdAt ?? conv2.updatedAt
+            return lastMessage1 > lastMessage2
+        }
         
         var today: [Conversation] = []
         var yesterday: [Conversation] = []
@@ -132,16 +140,19 @@ struct SidebarView: View {
         var thisMonth: [Conversation] = []
         var older: [Conversation] = []
         
-        for conversation in viewModel.filteredConversations {
-            if calendar.isDateInToday(conversation.updatedAt) {
+        for conversation in sortedConversations {
+            // Use the last message's creation time for grouping
+            let lastInteractionDate = conversation.messages.last?.createdAt ?? conversation.updatedAt
+            
+            if calendar.isDateInToday(lastInteractionDate) {
                 today.append(conversation)
-            } else if calendar.isDateInYesterday(conversation.updatedAt) {
+            } else if calendar.isDateInYesterday(lastInteractionDate) {
                 yesterday.append(conversation)
             } else if let weekAgo = calendar.date(byAdding: .day, value: -7, to: now),
-                      conversation.updatedAt > weekAgo {
+                      lastInteractionDate > weekAgo {
                 thisWeek.append(conversation)
             } else if let monthAgo = calendar.date(byAdding: .month, value: -1, to: now),
-                      conversation.updatedAt > monthAgo {
+                      lastInteractionDate > monthAgo {
                 thisMonth.append(conversation)
             } else {
                 older.append(conversation)
@@ -166,22 +177,21 @@ struct ConversationRow: View {
     let onDelete: () -> Void
     
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "bubble.left.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(isSelected ? .white : .blue)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(conversation.title)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
             
-            VStack(alignment: .leading, spacing: 2) {
-                Text(conversation.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                
+            // Show time since last message, not updatedAt
+            if let lastMessageDate = conversation.messages.last?.createdAt {
+                Text(lastMessageDate, style: .relative)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            } else {
                 Text(conversation.updatedAt, style: .relative)
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
-            
-            Spacer()
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -222,4 +232,3 @@ struct RenameSheet: View {
         .frame(width: 300)
     }
 }
-

@@ -2,6 +2,18 @@ import Foundation
 import SwiftUI
 import Combine
 
+// MARK: - Shared ViewModel Container
+/// Singleton container for sharing ChatViewModel across the app
+@MainActor
+class SharedChatViewModel {
+    static let shared = SharedChatViewModel()
+    let viewModel: ChatViewModel
+    
+    private init() {
+        viewModel = ChatViewModel()
+    }
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     @Published var messages: [Message] = []
@@ -326,17 +338,19 @@ class ChatViewModel: ObservableObject {
             saveCurrentConversationSilently()
         }
         
-        // Batch all state changes together
-        messages.removeAll()
-        attachedFiles = []
-        uploadedFileIds = []
-        inputText = ""
-        error = nil
-        currentConversationId = nil
-        currentAssistantMessageId = nil
-        isLoading = false
-        isSending = false
-        currentTokenCount = 0
+        // Defer state changes to avoid "Publishing changes from within view updates" warning
+        Task { @MainActor in
+            messages.removeAll()
+            attachedFiles = []
+            uploadedFileIds = []
+            inputText = ""
+            error = nil
+            currentConversationId = nil
+            currentAssistantMessageId = nil
+            isLoading = false
+            isSending = false
+            currentTokenCount = 0
+        }
     }
     
     func attachFiles(_ urls: [URL]) {
@@ -410,16 +424,19 @@ class ChatViewModel: ObservableObject {
             saveCurrentConversationSilently()
         }
         
-        // Batch all state changes together
-        currentConversationId = conversation.id
-        messages = conversation.messages
-        attachedFiles = []
-        uploadedFileIds = []
-        inputText = ""
-        error = nil
-        isLoading = false
-        isSending = false
-        currentAssistantMessageId = nil
+        // Defer state changes to avoid "Publishing changes from within view updates" warning
+        // This ensures updates happen outside the view update cycle
+        Task { @MainActor in
+            currentConversationId = conversation.id
+            messages = conversation.messages
+            attachedFiles = []
+            uploadedFileIds = []
+            inputText = ""
+            error = nil
+            isLoading = false
+            isSending = false
+            currentAssistantMessageId = nil
+        }
     }
     
     // Silent save that doesn't trigger view updates

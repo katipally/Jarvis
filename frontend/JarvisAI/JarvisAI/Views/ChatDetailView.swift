@@ -33,21 +33,47 @@ struct ChatDetailView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                // Only show token count when active
-                if viewModel.currentTokenCount > 0 || viewModel.isLoading {
-                    HStack(spacing: 4) {
-                        if viewModel.isLoading {
-                            ProgressView()
-                                .controlSize(.small)
-                                .scaleEffect(0.7)
+                // Token count and Focus mode button - consistent styling
+                HStack(spacing: 8) {
+                    // Token counter pill
+                    if viewModel.currentTokenCount > 0 || viewModel.isLoading || viewModel.totalTokensUsed > 0 {
+                        HStack(spacing: 5) {
+                            if viewModel.isLoading {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "sparkle")
+                                    .font(.system(size: 9))
+                            }
+                            Text("\(viewModel.currentTokenCount > 0 ? viewModel.currentTokenCount : viewModel.totalTokensUsed)")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
                         }
-                        Text("\(viewModel.currentTokenCount) tokens")
-                            .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
+                        )
                     }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    
+                    // Focus Mode button - matching style
+                    Button(action: openFocusMode) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "rectangle.compress.vertical")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help("Focus Mode (⇧⌘F)")
                 }
             }
         }
@@ -60,5 +86,9 @@ struct ChatDetailView: View {
         else if width > 900 { return (width - 750) / 2 }
         else if width > 700 { return 40 }
         else { return 16 }
+    }
+    
+    private func openFocusMode() {
+        NotificationCenter.default.post(name: NSNotification.Name("OpenFocusMode"), object: nil)
     }
 }

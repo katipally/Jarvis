@@ -1,126 +1,165 @@
 import SwiftUI
 import MarkdownUI
 
-/// Focus Panel - Menu bar popover like Control Center
-/// Provides quick access to Jarvis in a compact, focused interface
+/// Focus Panel - Control Center-style menu bar dropdown
+/// Clean, focused interface for quick Jarvis interactions
 struct FocusPanelView: View {
-    @StateObject private var viewModel = ChatViewModel()
-    @EnvironmentObject var appState: AppState
+    @ObservedObject var viewModel: ChatViewModel
     @FocusState private var isInputFocused: Bool
     @Environment(\.colorScheme) var colorScheme
     
+    init(viewModel: ChatViewModel? = nil) {
+        self.viewModel = viewModel ?? SharedChatViewModel.shared.viewModel
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            FocusPanelHeader(viewModel: viewModel, appState: appState)
+            // Control Center-style Header
+            FocusPanelHeader(viewModel: viewModel)
             
             Divider()
-                .padding(.horizontal, 16)
+                .opacity(0.3)
             
-            // Messages
-            FocusPanelMessages(viewModel: viewModel, isInputFocused: $isInputFocused)
+            // Chat Content
+            FocusChatArea(viewModel: viewModel, isInputFocused: $isInputFocused)
             
-            // Input
-            FocusPanelInput(viewModel: viewModel, isInputFocused: $isInputFocused)
+            // Same input pill as Chat window
+            FocusInputPill(viewModel: viewModel, isInputFocused: $isInputFocused)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
         }
-        .frame(width: 420, height: 580)
+        .frame(width: 380, height: 520)
         .background(
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+            ZStack {
+                VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+                Color.black.opacity(0.2)
+            }
         )
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
-// MARK: - Focus Panel Header
+// MARK: - Control Center-style Header
 struct FocusPanelHeader: View {
     @ObservedObject var viewModel: ChatViewModel
-    @ObservedObject var appState: AppState
     @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Jarvis Icon with status
-            ZStack {
-                if viewModel.isLoading {
-                    Circle()
-                        .stroke(
-                            AngularGradient(
-                                colors: [.purple, .blue, .pink, .purple],
-                                center: .center
-                            ),
-                            lineWidth: 2
-                        )
-                        .frame(width: 32, height: 32)
-                        .rotationEffect(.degrees(viewModel.isLoading ? 360 : 0))
-                        .animation(.linear(duration: 1.5).repeatForever(autoreverses: false), value: viewModel.isLoading)
+        VStack(spacing: 8) {
+            // Top row - Branding and actions
+            HStack(spacing: 10) {
+                // Jarvis branding with gradient circle
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.purple, Color.blue],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 28, height: 28)
+                        
+                        Text("J")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Jarvis")
+                            .font(.system(size: 14, weight: .semibold))
+                        
+                        if viewModel.isLoading {
+                            Text("Thinking...")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.purple, .blue],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 24, height: 24)
+                Spacer()
                 
-                Image(systemName: "sparkles")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Jarvis")
-                    .font(.system(size: 14, weight: .semibold))
-                
-                Text(viewModel.isLoading ? "Thinking..." : "Focus Mode")
-                    .font(.system(size: 11))
+                // Token count
+                if viewModel.currentTokenCount > 0 || viewModel.totalTokensUsed > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 9))
+                        Text("\(viewModel.currentTokenCount > 0 ? viewModel.currentTokenCount : viewModel.totalTokensUsed)")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    }
                     .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
-            
-            // Token count
-            if viewModel.totalTokensUsed > 0 {
-                Text("\(viewModel.totalTokensUsed)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.ultraThinMaterial, in: Capsule())
-            }
-            
-            // New chat
-            Button(action: { viewModel.startNewChat() }) {
-                Image(systemName: "plus.circle")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("New Chat")
-            
-            // Open main window
-            Button(action: {
-                appState.currentMode = .chat
-                NSApp.activate(ignoringOtherApps: true)
-                if let window = NSApp.windows.first(where: { $0.title.contains("Jarvis") || $0.isMainWindow }) {
-                    window.makeKeyAndOrderFront(nil)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.1), in: Capsule())
                 }
-            }) {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
+                
+                // New Chat button
+                Button(action: { viewModel.startNewChat() }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .help("New Chat (⌘N)")
+                
+                // Expand to main window
+                Button(action: openMainWindow) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .help("Expand Window (⇧⌘O)")
             }
-            .buttonStyle(.plain)
-            .help("Open Full Window")
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
+            
+            // Loading progress bar
+            if viewModel.isLoading {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.1))
+                            .frame(height: 2)
+                        
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [.purple, .blue, .purple],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: geometry.size.width * 0.3, height: 2)
+                            .offset(x: loadingOffset(width: geometry.size.width))
+                            .animation(.linear(duration: 1.5).repeatForever(autoreverses: false), value: viewModel.isLoading)
+                    }
+                }
+                .frame(height: 2)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+    }
+    
+    private func loadingOffset(width: CGFloat) -> CGFloat {
+        // This creates an animated loading bar effect
+        return viewModel.isLoading ? width * 0.7 : 0
+    }
+    
+    private func openMainWindow() {
+        AppDelegate.shared?.openMainWindow()
     }
 }
 
-// MARK: - Focus Panel Messages
-struct FocusPanelMessages: View {
+// MARK: - Focus Chat Area
+struct FocusChatArea: View {
     @ObservedObject var viewModel: ChatViewModel
     @FocusState.Binding var isInputFocused: Bool
     @Environment(\.colorScheme) var colorScheme
@@ -128,104 +167,119 @@ struct FocusPanelMessages: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: 10) {
                     if viewModel.messages.isEmpty {
-                        FocusPanelEmptyState()
-                            .frame(minHeight: 300)
+                        FocusEmptyState()
+                            .frame(minHeight: 260)
                     } else {
                         ForEach(viewModel.messages.filter { $0.role != .system }) { message in
-                            FocusPanelMessageBubble(
-                                message: message,
-                                viewModel: viewModel
-                            )
-                            .id(message.id)
+                            FocusMessageRow(message: message, viewModel: viewModel)
+                                .id(message.id)
                         }
                     }
                     
                     Color.clear.frame(height: 8)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
             }
             .scrollIndicators(.hidden)
             .onChange(of: viewModel.messages.count) { _ in
-                withAnimation(.spring(response: 0.3)) {
-                    if let lastId = viewModel.messages.filter({ $0.role != .system }).last?.id {
-                        proxy.scrollTo(lastId, anchor: .bottom)
-                    }
-                }
+                scrollToBottom(proxy)
+            }
+            .onChange(of: viewModel.messages.last?.content) { _ in
+                scrollToBottom(proxy)
+            }
+        }
+    }
+    
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            if let lastId = viewModel.messages.filter({ $0.role != .system }).last?.id {
+                proxy.scrollTo(lastId, anchor: .bottom)
             }
         }
     }
 }
 
-// MARK: - Focus Panel Empty State
-struct FocusPanelEmptyState: View {
+// MARK: - Focus Empty State
+struct FocusEmptyState: View {
     var body: some View {
         VStack(spacing: 16) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 40, weight: .light))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.purple, .blue],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.purple.opacity(0.3), Color.blue.opacity(0.3)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
+                    .frame(width: 64, height: 64)
+                
+                Image(systemName: "sparkles")
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.purple, .blue],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
             
             VStack(spacing: 6) {
                 Text("Focus Mode")
                     .font(.system(size: 16, weight: .semibold))
                 
-                Text("Quick access to Jarvis\nfrom your menu bar")
+                Text("Quick access to Jarvis")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
             }
         }
     }
 }
 
-// MARK: - Focus Panel Message Bubble
-struct FocusPanelMessageBubble: View {
+// MARK: - Focus Message Row
+struct FocusMessageRow: View {
     let message: Message
     @ObservedObject var viewModel: ChatViewModel
     @Environment(\.colorScheme) var colorScheme
     @State private var isHovering = false
     
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 0) {
             if message.role == .user {
-                Spacer(minLength: 40)
+                Spacer(minLength: 50)
             }
             
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-                // Files
+                // Attachments
                 if !message.attachedFileNames.isEmpty {
                     HStack(spacing: 4) {
-                        ForEach(message.attachedFileNames, id: \.self) { name in
-                            HStack(spacing: 4) {
-                                Image(systemName: "paperclip")
-                                    .font(.system(size: 9))
-                                Text(name)
-                                    .font(.system(size: 9))
-                                    .lineLimit(1)
-                            }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(.blue.opacity(0.15)))
-                            .foregroundStyle(.blue)
+                        ForEach(message.attachedFileNames.prefix(2), id: \.self) { name in
+                            Label(name, systemImage: "paperclip")
+                                .font(.system(size: 9))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color.blue.opacity(0.2)))
+                                .foregroundStyle(.blue)
+                        }
+                        if message.attachedFileNames.count > 2 {
+                            Text("+\(message.attachedFileNames.count - 2)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
                 
-                // Message content
+                // Content
                 Group {
                     if message.isStreaming && message.content.isEmpty {
                         HStack(spacing: 4) {
-                            ForEach(0..<3, id: \.self) { _ in
+                            ForEach(0..<3, id: \.self) { i in
                                 Circle()
-                                    .fill(Color.secondary.opacity(0.5))
+                                    .fill(Color.white.opacity(0.5))
                                     .frame(width: 5, height: 5)
                             }
                         }
@@ -233,22 +287,21 @@ struct FocusPanelMessageBubble: View {
                         .padding(.vertical, 10)
                     } else {
                         Markdown(message.content)
-                            .markdownTheme(.compact)
+                            .markdownTheme(.focusCompact)
                             .textSelection(.enabled)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                     }
                 }
-                .font(.system(size: 13))
                 .foregroundStyle(message.role == .user ? .white : .primary)
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(bubbleColor)
+                        .fill(message.role == .user ? Color.blue : Color.white.opacity(0.12))
                 )
                 
                 // Actions on hover
                 if isHovering && !message.isStreaming {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Button(action: { copyToClipboard(message.content) }) {
                             Image(systemName: "doc.on.doc")
                                 .font(.system(size: 10))
@@ -264,15 +317,9 @@ struct FocusPanelMessageBubble: View {
                             .disabled(viewModel.isLoading)
                         }
                     }
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
                     .transition(.opacity)
-                }
-                
-                // Timestamp
-                if !message.isStreaming {
-                    Text(message.createdAt, style: .time)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
                 }
             }
             .onHover { hovering in
@@ -282,16 +329,8 @@ struct FocusPanelMessageBubble: View {
             }
             
             if message.role == .assistant {
-                Spacer(minLength: 40)
+                Spacer(minLength: 50)
             }
-        }
-    }
-    
-    private var bubbleColor: Color {
-        if message.role == .user {
-            return .blue
-        } else {
-            return colorScheme == .dark ? Color(white: 0.18) : Color(white: 0.92)
         }
     }
     
@@ -301,15 +340,15 @@ struct FocusPanelMessageBubble: View {
     }
 }
 
-// MARK: - Focus Panel Input
-struct FocusPanelInput: View {
+// MARK: - Focus Input Pill (Same style as Chat window)
+struct FocusInputPill: View {
     @ObservedObject var viewModel: ChatViewModel
     @FocusState.Binding var isInputFocused: Bool
     @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        VStack(spacing: 8) {
-            // Attached files
+        VStack(spacing: 6) {
+            // Attached files preview
             if !viewModel.attachedFiles.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -320,33 +359,36 @@ struct FocusPanelInput: View {
                                 Text(file.lastPathComponent)
                                     .font(.system(size: 10))
                                     .lineLimit(1)
+                                    .frame(maxWidth: 80)
                                 Button(action: { viewModel.removeFile(file) }) {
                                     Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 10))
+                                        .font(.system(size: 12))
                                 }
                                 .buttonStyle(.plain)
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Capsule().fill(.blue.opacity(0.15)))
+                            .background(Capsule().fill(Color.blue.opacity(0.2)))
                             .foregroundStyle(.blue)
                         }
                     }
-                    .padding(.horizontal, 16)
                 }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             
-            // Input bar
-            HStack(spacing: 8) {
-                // Attach
+            // Main input pill - matching chat window style
+            HStack(alignment: .bottom, spacing: 0) {
+                // Attach Button
                 Button(action: { viewModel.showFilePicker = true }) {
                     Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 20))
+                        .font(.system(size: 22))
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.6))
                 }
                 .buttonStyle(.plain)
                 .disabled(viewModel.isLoading)
+                .padding(.leading, 8)
+                .padding(.bottom, 7)
                 .fileImporter(
                     isPresented: $viewModel.showFilePicker,
                     allowedContentTypes: [.pdf, .plainText, .image, .png, .jpeg],
@@ -357,16 +399,18 @@ struct FocusPanelInput: View {
                     }
                 }
                 
-                // Text field
+                // Text Input
                 TextField("Ask anything...", text: $viewModel.inputText, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13))
+                    .font(.system(size: 14))
                     .lineLimit(1...4)
                     .focused($isInputFocused)
                     .disabled(viewModel.isSending)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 10)
                     .onSubmit { sendMessage() }
                 
-                // Send/Stop
+                // Send/Stop Button
                 if !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.attachedFiles.isEmpty || viewModel.isLoading {
                     Button(action: {
                         if viewModel.isLoading {
@@ -376,27 +420,23 @@ struct FocusPanelInput: View {
                         }
                     }) {
                         Image(systemName: viewModel.isLoading ? "stop.circle.fill" : "arrow.up.circle.fill")
-                            .font(.system(size: 24))
+                            .font(.system(size: 26))
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(viewModel.isLoading ? .red : .blue)
                     }
                     .buttonStyle(.plain)
+                    .padding(.trailing, 6)
+                    .padding(.bottom, 5)
                     .transition(.scale.combined(with: .opacity))
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
-                    )
+                Capsule()
+                    .fill(Color.white.opacity(0.12))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 0.5))
             )
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
         }
+        .animation(.spring(response: 0.3), value: viewModel.inputText.isEmpty)
         .animation(.spring(response: 0.3), value: viewModel.attachedFiles.count)
     }
     
@@ -409,11 +449,12 @@ struct FocusPanelInput: View {
     }
 }
 
-// MARK: - Compact Markdown Theme
+// MARK: - Focus Compact Markdown Theme
 extension MarkdownUI.Theme {
-    static let compact = Theme()
+    static let focusCompact = Theme()
         .text {
             FontSize(13)
+            ForegroundColor(.primary)
         }
         .code {
             FontFamilyVariant(.monospaced)
@@ -422,8 +463,11 @@ extension MarkdownUI.Theme {
         .codeBlock { configuration in
             configuration.label
                 .padding(8)
-                .background(Color.secondary.opacity(0.1))
+                .background(Color.black.opacity(0.2))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
         }
+        .paragraph { configuration in
+            configuration.label
+                .lineSpacing(3)
+        }
 }
-

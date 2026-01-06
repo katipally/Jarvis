@@ -101,10 +101,26 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                             
                             if hasattr(message, "tool_calls") and message.tool_calls:
                                 for tool_call in message.tool_calls:
-                                    reasoning_text = f"Using tool: {tool_call['name']}"
+                                    tool_name = tool_call['name']
+                                    tool_args = tool_call.get('args', {})
+                                    
+                                    # Generate descriptive text for Mac automation tools
+                                    if tool_name == "run_mac_script":
+                                        script_id = tool_args.get('script_id', 'unknown')
+                                        reasoning_text = f"🖥️ Running Mac script: {script_id}"
+                                    elif tool_name == "execute_applescript":
+                                        reasoning_text = "🖥️ Executing custom AppleScript"
+                                    elif tool_name == "execute_shell_command":
+                                        cmd = tool_args.get('command', '')[:50]
+                                        reasoning_text = f"💻 Running shell command: {cmd}..."
+                                    elif tool_name == "get_available_mac_scripts":
+                                        reasoning_text = "📋 Getting available automation scripts"
+                                    else:
+                                        reasoning_text = f"Using tool: {tool_name}"
+                                    
                                     reasoning_items.append(reasoning_text)
                                     yield f"data: {json.dumps({'type': 'reasoning', 'content': reasoning_text})}\n\n"
-                                    yield f"data: {json.dumps({'type': 'tool', 'tool_name': tool_call['name']})}\n\n"
+                                    yield f"data: {json.dumps({'type': 'tool', 'tool_name': tool_name, 'tool_args': tool_args})}\n\n"
                     
                     if node_name == "tools":
                         reasoning_items.append("Processing tool results...")
