@@ -19,6 +19,21 @@
 		AA0019 /* ReasoningDropdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0020 /* ReasoningDropdownView.swift */; };
 		AA0021 /* FileUploadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0022 /* FileUploadView.swift */; };
 		AA0023 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = AA0024 /* MarkdownUI */; };
+		AA0025 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0026 /* DesignSystem.swift */; };
+		AA0027 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0028 /* AppColors.swift */; };
+		AA0029 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0030 /* Conversation.swift */; };
+		AA0031 /* ConversationStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0032 /* ConversationStorage.swift */; };
+		AA0033 /* ChatDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0034 /* ChatDetailView.swift */; };
+		AA0035 /* MessagesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0036 /* MessagesListView.swift */; };
+		AA0037 /* FilePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0038 /* FilePreviewView.swift */; };
+		AA0039 /* MessageActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0040 /* MessageActionsView.swift */; };
+		AA0041 /* FloatingInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0042 /* FloatingInputView.swift */; };
+		AA0043 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0044 /* SettingsView.swift */; };
+		AA0045 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0046 /* SidebarView.swift */; };
+		AA0047 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0048 /* EmptyStateView.swift */; };
+		AA0049 /* ConversationExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0050 /* ConversationExport.swift */; };
+		AA0051 /* FocusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0052 /* FocusView.swift */; };
+		AA0053 /* FocusPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0054 /* FocusPanelView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +48,21 @@
 		AA0018 /* MessageBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubbleView.swift; sourceTree = "<group>"; };
 		AA0020 /* ReasoningDropdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReasoningDropdownView.swift; sourceTree = "<group>"; };
 		AA0022 /* FileUploadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileUploadView.swift; sourceTree = "<group>"; };
+		AA0026 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		AA0028 /* AppColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColors.swift; sourceTree = "<group>"; };
+		AA0030 /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
+		AA0032 /* ConversationStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStorage.swift; sourceTree = "<group>"; };
+		AA0034 /* ChatDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatDetailView.swift; sourceTree = "<group>"; };
+		AA0036 /* MessagesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesListView.swift; sourceTree = "<group>"; };
+		AA0038 /* FilePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePreviewView.swift; sourceTree = "<group>"; };
+		AA0040 /* MessageActionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageActionsView.swift; sourceTree = "<group>"; };
+		AA0042 /* FloatingInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingInputView.swift; sourceTree = "<group>"; };
+		AA0044 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		AA0046 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		AA0048 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
+		AA0050 /* ConversationExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationExport.swift; sourceTree = "<group>"; };
+		AA0052 /* FocusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusView.swift; sourceTree = "<group>"; };
+		AA0054 /* FocusPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelView.swift; sourceTree = "<group>"; };
 		AAPP01 /* JarvisAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JarvisAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -77,6 +107,16 @@
 				AA0018 /* MessageBubbleView.swift */,
 				AA0020 /* ReasoningDropdownView.swift */,
 				AA0022 /* FileUploadView.swift */,
+				AA0034 /* ChatDetailView.swift */,
+				AA0036 /* MessagesListView.swift */,
+				AA0038 /* FilePreviewView.swift */,
+				AA0040 /* MessageActionsView.swift */,
+				AA0042 /* FloatingInputView.swift */,
+				AA0044 /* SettingsView.swift */,
+				AA0046 /* SidebarView.swift */,
+				AA0048 /* EmptyStateView.swift */,
+				AA0052 /* FocusView.swift */,
+				AA0054 /* FocusPanelView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -94,6 +134,7 @@
 			children = (
 				AA0010 /* APIService.swift */,
 				AA0012 /* StreamingService.swift */,
+				AA0032 /* ConversationStorage.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -102,6 +143,7 @@
 			isa = PBXGroup;
 			children = (
 				AA0014 /* Message.swift */,
+				AA0030 /* Conversation.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -110,6 +152,9 @@
 			isa = PBXGroup;
 			children = (
 				AA0008 /* Config.swift */,
+				AA0026 /* DesignSystem.swift */,
+				AA0028 /* AppColors.swift */,
+				AA0050 /* ConversationExport.swift */,
 			);
 			path = Utils;
 			sourceTree = "<group>";
@@ -195,13 +240,28 @@
 				AA0001 /* JarvisAIApp.swift in Sources */,
 				AA0003 /* ContentView.swift in Sources */,
 				AA0007 /* Config.swift in Sources */,
+				AA0025 /* DesignSystem.swift in Sources */,
+				AA0027 /* AppColors.swift in Sources */,
 				AA0009 /* APIService.swift in Sources */,
 				AA0011 /* StreamingService.swift in Sources */,
+				AA0031 /* ConversationStorage.swift in Sources */,
 				AA0013 /* Message.swift in Sources */,
+				AA0029 /* Conversation.swift in Sources */,
 				AA0015 /* ChatViewModel.swift in Sources */,
 				AA0017 /* MessageBubbleView.swift in Sources */,
 				AA0019 /* ReasoningDropdownView.swift in Sources */,
 				AA0021 /* FileUploadView.swift in Sources */,
+				AA0033 /* ChatDetailView.swift in Sources */,
+				AA0035 /* MessagesListView.swift in Sources */,
+				AA0037 /* FilePreviewView.swift in Sources */,
+				AA0039 /* MessageActionsView.swift in Sources */,
+				AA0041 /* FloatingInputView.swift in Sources */,
+				AA0043 /* SettingsView.swift in Sources */,
+				AA0045 /* SidebarView.swift in Sources */,
+				AA0047 /* EmptyStateView.swift in Sources */,
+				AA0049 /* ConversationExport.swift in Sources */,
+				AA0051 /* FocusView.swift in Sources */,
+				AA0053 /* FocusPanelView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -230,7 +290,7 @@
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = "macosx";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 6.0;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
 		};
@@ -256,7 +316,7 @@
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = "macosx";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 6.0;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};

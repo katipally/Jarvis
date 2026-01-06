@@ -1,211 +1,181 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - File Upload View (HIG Compliant)
-// Following Apple Human Interface Guidelines for drag and drop
-
+/// File Upload View for drag-and-drop and file selection
 struct FileUploadView: View {
     @ObservedObject var viewModel: ChatViewModel
-    @State private var isTargeted = false
-    @State private var showFilePicker = false
+    @State private var isDropTargeted = false
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
         VStack(spacing: 16) {
-            // Drop Zone (HIG: Clear drop target)
-            dropZone
+            // Drop Zone
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(
+                        isDropTargeted ? Color.blue : Color.gray.opacity(0.3),
+                        style: StrokeStyle(lineWidth: 2, dash: [8])
+                    )
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(isDropTargeted ? Color.blue.opacity(0.1) : Color.clear)
+                    )
+                
+                VStack(spacing: 12) {
+                    Image(systemName: "arrow.down.doc")
+                        .font(.system(size: 36))
+                        .foregroundStyle(isDropTargeted ? .blue : .secondary)
+                    
+                    Text("Drop files here")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    
+                    Text("or")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                    
+                    Button(action: { viewModel.showFilePicker = true }) {
+                        Label("Browse Files", systemImage: "folder")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.blue)
+                }
+                .padding(24)
+            }
+            .frame(height: 180)
+            .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+                handleDrop(providers: providers)
+            }
+            
+            // Supported Formats
+            HStack(spacing: 16) {
+                ForEach(supportedFormats, id: \.0) { format, icon in
+                    HStack(spacing: 4) {
+                        Image(systemName: icon)
+                            .font(.system(size: 10))
+                        Text(format)
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.tertiary)
+                }
+            }
             
             // Attached Files List
             if !viewModel.attachedFiles.isEmpty {
-                attachedFilesList
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Attached Files")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    
+                    ForEach(viewModel.attachedFiles, id: \.self) { file in
+                        AttachedFileRow(file: file) {
+                            viewModel.removeFile(file)
+                        }
+                    }
+                }
+                .padding(.top, 8)
             }
         }
         .fileImporter(
-            isPresented: $showFilePicker,
-            allowedContentTypes: supportedTypes,
+            isPresented: $viewModel.showFilePicker,
+            allowedContentTypes: [.pdf, .plainText, .image, .png, .jpeg],
             allowsMultipleSelection: true
         ) { result in
-            handleFileSelection(result)
+            if case .success(let urls) = result {
+                viewModel.attachFiles(urls)
+            }
         }
     }
     
-    // MARK: - Drop Zone
-    private var dropZone: some View {
-        VStack(spacing: 16) {
-            // Icon
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isTargeted ? AnyShapeStyle(.blue.opacity(0.1)) : AnyShapeStyle(.quaternary))
-                    .frame(width: 64, height: 64)
-                
-                Image(systemName: isTargeted ? "arrow.down.doc.fill" : "doc.badge.plus")
-                    .font(.system(size: 28))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(isTargeted ? .blue : .secondary)
-            }
-            .animation(.spring(response: 0.3), value: isTargeted)
-            
-            // Text
-            VStack(spacing: 4) {
-                Text(isTargeted ? "Drop files here" : "Drag files here")
-                    .font(.headline)
-                
-                Text("or click to browse")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            
-            // Supported formats
-            HStack(spacing: 8) {
-                ForEach(["PDF", "Images", "Text"], id: \.self) { type in
-                    Text(type)
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.quaternary, in: Capsule())
-                }
-            }
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(32)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.background)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(
-                            isTargeted ? AnyShapeStyle(.blue) : AnyShapeStyle(.quaternary),
-                            style: StrokeStyle(lineWidth: 2, dash: isTargeted ? [] : [8, 4])
-                        )
-                )
-        )
-        .contentShape(Rectangle())
-        .onTapGesture { showFilePicker = true }
-        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
-            handleDrop(providers)
-        }
-        .animation(.spring(response: 0.3), value: isTargeted)
+    private var supportedFormats: [(String, String)] {
+        [
+            ("PDF", "doc.fill"),
+            ("Images", "photo.fill"),
+            ("Text", "doc.text.fill"),
+            ("Code", "curlybraces")
+        ]
     }
     
-    // MARK: - Attached Files List
-    private var attachedFilesList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Attached Files")
-                .font(.headline)
-            
-            ForEach(viewModel.attachedFiles, id: \.self) { file in
-                FileRow(
-                    fileName: file.lastPathComponent,
-                    fileExtension: file.pathExtension,
-                    onRemove: { viewModel.removeFile(file) }
-                )
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    
-    // MARK: - Supported Types
-    private var supportedTypes: [UTType] {
-        [.pdf, .plainText, .image, .png, .jpeg, .heic, .json, .xml]
-    }
-    
-    // MARK: - Handlers
-    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
         for provider in providers {
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                guard let data = item as? Data,
-                      let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-                
-                DispatchQueue.main.async {
-                    viewModel.attachFiles([url])
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { data, error in
+                    if let data = data as? Data,
+                       let urlString = String(data: data, encoding: .utf8),
+                       let url = URL(string: urlString) {
+                        DispatchQueue.main.async {
+                            viewModel.attachFiles([url])
+                        }
+                    }
                 }
             }
         }
         return true
     }
-    
-    private func handleFileSelection(_ result: Result<[URL], Error>) {
-        if case .success(let urls) = result {
-            viewModel.attachFiles(urls)
-        }
-    }
 }
 
-// MARK: - File Row
-struct FileRow: View {
-    let fileName: String
-    let fileExtension: String
+struct AttachedFileRow: View {
+    let file: URL
     let onRemove: () -> Void
     
-    @State private var isHovered = false
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            // File Icon
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(iconColor.opacity(0.15))
-                    .frame(width: 40, height: 40)
-                
-                Image(systemName: iconName)
-                    .font(.system(size: 18))
-                    .foregroundStyle(iconColor)
-            }
-            
-            // File Info
-            VStack(alignment: .leading, spacing: 2) {
-                Text(fileName)
-                    .font(.body)
-                    .lineLimit(1)
-                
-                Text(fileExtension.uppercased())
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
-            
-            // Remove Button
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title3)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .opacity(isHovered ? 1 : 0.5)
-        }
-        .padding(12)
-        .background(isHovered ? Color(nsColor: .controlBackgroundColor) : .clear, in: RoundedRectangle(cornerRadius: 10))
-        .onHover { isHovered = $0 }
-    }
-    
-    private var iconName: String {
-        switch fileExtension.lowercased() {
+    private var fileIcon: String {
+        let ext = file.pathExtension.lowercased()
+        switch ext {
         case "pdf": return "doc.fill"
-        case "png", "jpg", "jpeg", "heic", "gif": return "photo.fill"
+        case "png", "jpg", "jpeg", "gif", "heic", "webp": return "photo.fill"
         case "txt", "md": return "doc.text.fill"
-        case "swift", "py", "js", "ts": return "chevron.left.forwardslash.chevron.right"
-        case "json", "xml": return "curlybraces"
+        case "swift", "py", "js", "ts", "json": return "chevron.left.forwardslash.chevron.right"
         default: return "doc.fill"
         }
     }
     
-    private var iconColor: Color {
-        switch fileExtension.lowercased() {
-        case "pdf": return .red
-        case "png", "jpg", "jpeg", "heic", "gif": return .green
-        case "txt", "md": return .blue
-        case "swift": return .orange
-        case "py": return .yellow
-        case "js", "ts": return .yellow
-        default: return .gray
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: fileIcon)
+                .font(.system(size: 14))
+                .foregroundStyle(.blue)
+                .frame(width: 28, height: 28)
+                .background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.lastPathComponent)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                
+                Text(file.pathExtension.uppercased())
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            
+            Spacer()
+            
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
         }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.gray.opacity(0.1))
+        )
+    }
+}
+
+struct FileUploadPreviewContainer: View {
+    @StateObject private var viewModel = ChatViewModel()
+    
+    var body: some View {
+        FileUploadView(viewModel: viewModel)
+            .padding()
+            .frame(width: 400)
     }
 }
 
 #Preview {
-    FileUploadView(viewModel: ChatViewModel())
-        .frame(width: 400)
-        .padding()
+    FileUploadPreviewContainer()
 }
+

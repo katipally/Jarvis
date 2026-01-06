@@ -23,6 +23,10 @@ struct Conversation: Identifiable, Codable {
         messages.first(where: { $0.role == .user })?.content.prefix(50).description ?? "Empty conversation"
     }
     
+    var totalTokens: Int {
+        messages.reduce(0) { $0 + $1.tokenCount }
+    }
+    
     mutating func updateTitle() {
         if let firstUserMessage = messages.first(where: { $0.role == .user }) {
             title = String(firstUserMessage.content.prefix(40))

@@ -2,58 +2,89 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
-    @AppStorage("apiBaseURL") private var apiBaseURL: String = "http://localhost:8000/api"
-    @AppStorage("includeReasoning") private var includeReasoning: Bool = true
-    @AppStorage("autoScroll") private var autoScroll: Bool = true
+    @ObservedObject var viewModel: ChatViewModel
+    @AppStorage("apiBaseURL") private var apiBaseURL = "http://localhost:8000/api"
+    @AppStorage("includeReasoning") private var includeReasoning = true
+    @AppStorage("appTheme") private var appTheme: AppTheme = .system
+    @AppStorage("showTokenCount") private var showTokenCount = true
     
     var body: some View {
         NavigationStack {
             Form {
-                Section("API Configuration") {
-                    TextField("API Base URL", text: $apiBaseURL)
+                Section {
+                    Picker(selection: $appTheme) {
+                        ForEach(AppTheme.allCases, id: \.self) { theme in
+                            Text(theme.rawValue).tag(theme)
+                        }
+                    } label: {
+                        Label("Appearance", systemImage: "paintbrush")
+                    }
+                } header: {
+                    Text("General")
+                }
+                
+                Section {
+                    Toggle(isOn: $includeReasoning) {
+                        Label("Show AI Reasoning", systemImage: "brain")
+                    }
+                    Toggle(isOn: $showTokenCount) {
+                        Label("Show Token Usage", systemImage: "cpu")
+                    }
+                } header: {
+                    Text("Intelligence")
+                }
+                
+                Section {
+                    TextField("URL", text: $apiBaseURL)
                         .textFieldStyle(.roundedBorder)
-                    
-                    Text("Current endpoint: \(apiBaseURL)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                } header: {
+                    Text("Backend Connection")
                 }
                 
-                Section("Chat Settings") {
-                    Toggle("Include Reasoning", isOn: $includeReasoning)
-                    Toggle("Auto-scroll to Latest", isOn: $autoScroll)
+                Section {
+                    let stats = viewModel.getSessionStats()
+                    LabeledContent("Tokens This Session", value: "\(stats.tokens)")
+                    LabeledContent("Estimated Cost", value: String(format: "$%.6f", stats.cost))
+                    
+                    Button(role: .destructive) {
+                        viewModel.resetSessionStats()
+                    } label: {
+                        Text("Reset Statistics")
+                    }
+                } header: {
+                    Text("Usage Statistics")
                 }
                 
-                Section("About") {
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text("1.0.0")
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    HStack {
-                        Text("Model")
-                        Spacer()
-                        Text("GPT-5-nano")
-                            .foregroundColor(.secondary)
-                    }
+                Section {
+                    LabeledContent("Version", value: "1.2.0")
+                    LabeledContent("Engine", value: "Apple Intelligence (Mock)")
+                    LabeledContent("Interface", value: "Liquid Glass 2.0")
+                } header: {
+                    Text("System Information")
                 }
             }
             .formStyle(.grouped)
             .navigationTitle("Settings")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
             }
-            .frame(width: 500, height: 400)
+            .frame(width: 480, height: 550)
+            .background(MacOS26Materials.sidebar)
         }
     }
 }
 
+struct SettingsPreviewContainer: View {
+    @StateObject private var viewModel = ChatViewModel()
+    
+    var body: some View {
+        SettingsView(viewModel: viewModel)
+    }
+}
+
 #Preview {
-    SettingsView()
+    SettingsPreviewContainer()
 }
 

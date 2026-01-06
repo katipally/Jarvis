@@ -1,201 +1,196 @@
 import SwiftUI
 import MarkdownUI
 
-// MARK: - Message Bubble View (HIG Compliant for macOS 26+)
-// Following Apple Human Interface Guidelines
-
+/// Message Bubble View Unified for macOS 26
+/// Following iMessage design language with Liquid Glass effects
 struct MessageBubbleView: View {
     let message: Message
-    @State private var showReasoning = false
+    @ObservedObject var viewModel: ChatViewModel
+    @FocusState.Binding var isInputFocused: Bool
     @Environment(\.colorScheme) var colorScheme
+    @State private var showBranchConfirm = false
+    @State private var isEditing = false
+    @State private var editContent = ""
     
     var body: some View {
-        let isUser = message.role == .user
-        
-        HStack(alignment: .top, spacing: 12) {
-            if isUser { Spacer(minLength: 80) }
-            
-            if !isUser && message.role == .assistant {
-                avatarView(isUser: false)
+        HStack(alignment: .bottom, spacing: 12) {
+            if message.role == .user { 
+                Spacer(minLength: 80) 
             }
             
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 8) {
-                // Attachments
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
+                // File Previews
                 if !message.attachedFileNames.isEmpty {
-                    attachmentsView(isUser: isUser)
+                    FilePreviewRow(
+                        fileNames: message.attachedFileNames,
+                        fileIds: message.attachedFileIds,
+                        isUser: message.role == .user
+                    )
                 }
                 
-                // Message Bubble
-                messageBubble(isUser: isUser)
+                // Message Bubble with Markdown
+                MessageBubbleContent(
+                    message: message,
+                    colorScheme: colorScheme,
+                    isEditing: $isEditing,
+                    editContent: $editContent
+                )
                 
-                // Actions
-                if !message.isStreaming {
-                    actionsRow(isUser: isUser)
+                // Error Recovery
+                if message.isError {
+                    ErrorRecoveryView(message: message, viewModel: viewModel)
                 }
+                
+                // Actions (Only show for assistant or when not editing)
+                if !message.isStreaming && !isEditing {
+                    MessageActionsView(
+                        message: message,
+                        viewModel: viewModel,
+                        isInputFocused: $isInputFocused,
+                        showBranchConfirm: $showBranchConfirm,
+                        isEditing: $isEditing,
+                        editContent: $editContent
+                    )
+                }
+                
+                // Metadata
+                HStack(spacing: 8) {
+                    if message.role == .assistant && message.tokenCount > 0 && !message.isStreaming {
+                        Text("\(message.tokenCount) tokens")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                    
+                    if message.role == .assistant && !message.isStreaming {
+                        Text(message.createdAt, style: .time)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.horizontal, 4)
                 
                 // Reasoning
-                if message.hasReasoning && !isUser {
-                    reasoningSection
+                if message.hasReasoning && message.role == .assistant {
+                    ReasoningSection(reasoning: message.reasoning)
                 }
             }
-            .frame(maxWidth: 600, alignment: isUser ? .trailing : .leading)
+            .frame(maxWidth: 700, alignment: message.role == .user ? .trailing : .leading)
             
-            if isUser {
-                avatarView(isUser: true)
-            }
-            
-            if !isUser { Spacer(minLength: 80) }
-        }
-    }
-    
-    // MARK: - Avatar
-    private func avatarView(isUser: Bool) -> some View {
-        ZStack {
-            if isUser {
-                Circle()
-                    .fill(Color.accentColor)
-                    .frame(width: 32, height: 32)
-                
-                Image(systemName: "person.fill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white)
-            } else {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.blue, .purple],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 32, height: 32)
-                
-                Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white)
+            if message.role == .assistant { 
+                Spacer(minLength: 80) 
             }
         }
+        .padding(.vertical, 4)
+        .confirmationDialog("Create Branch?", isPresented: $showBranchConfirm) {
+            Button("Branch from here") {
+                viewModel.branchFromMessage(message)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will create a new conversation branch from this message.")
+        }
     }
+}
+
+struct MessageBubbleContent: View {
+    let message: Message
+    let colorScheme: ColorScheme
+    @Binding var isEditing: Bool
+    @Binding var editContent: String
     
-    // MARK: - Message Bubble
     @ViewBuilder
-    private func messageBubble(isUser: Bool) -> some View {
-        Group {
-            if message.isStreaming && message.content.isEmpty {
-                ProgressView()
-                    .controlSize(.small)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-            } else {
-                Markdown(message.content)
-                    .textSelection(.enabled)
-                    .markdownTextStyle(\.text) {
-                        ForegroundColor(isUser ? .white : Color(nsColor: .labelColor))
-                        FontSize(15)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isUser ? AnyShapeStyle(userBubbleGradient) : AnyShapeStyle(Color(nsColor: .controlBackgroundColor)))
-        )
-    }
-    
-    private var userBubbleGradient: LinearGradient {
-        LinearGradient(
-            colors: [Color.accentColor, Color.accentColor.opacity(0.85)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-    
-    // MARK: - Attachments
-    private func attachmentsView(isUser: Bool) -> some View {
-        HStack(spacing: 6) {
-            ForEach(message.attachedFileNames, id: \.self) { fileName in
-                Label(fileName, systemImage: "paperclip")
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(isUser ? .white.opacity(0.2) : .blue.opacity(0.1), in: Capsule())
-                    .foregroundStyle(isUser ? .white : .blue)
-            }
+    private var content: some View {
+        if message.isStreaming && message.content.isEmpty {
+            ProgressView()
+                .controlSize(.small)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+        } else if isEditing && message.role == .user {
+            TextEditor(text: $editContent)
+                .font(.body)
+                .frame(minHeight: 60, maxHeight: 250)
+                .padding(12)
+                .scrollContentBackground(.hidden)
+                .background(Color.white.opacity(0.05))
+                .cornerRadius(12)
+        } else {
+            Markdown(message.content)
+                .markdownTheme(.basic)
+                .markdownBlockStyle(\.codeBlock) { configuration in
+                    configuration.label
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(colorScheme == .dark ? Color(white: 0.12) : Color(white: 0.96))
+                        )
+                        .markdownTextStyle {
+                            FontFamilyVariant(.monospaced)
+                            FontSize(13)
+                        }
+                }
+                .textSelection(.enabled)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
         }
     }
     
-    // MARK: - Actions Row
-    private func actionsRow(isUser: Bool) -> some View {
-        HStack(spacing: 8) {
-            Button(action: copyToClipboard) {
-                Label("Copy", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(.bordered)
+    var body: some View {
+        content
+            .foregroundStyle(message.role == .user ? .white : (colorScheme == .dark ? .white : .primary))
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(bubbleColor)
+                    .liquidGlass(opacity: message.role == .assistant ? 0.6 : 1.0, cornerRadius: 22)
+            )
+            .overlay(
+                message.isError ?
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(.red.opacity(0.5), lineWidth: 1) : nil
+            )
+    }
+    
+    private var bubbleColor: Color {
+        if message.isError {
+            return colorScheme == .dark ? .red.opacity(0.2) : .red.opacity(0.1)
+        } else if message.role == .user {
+            return iMessageColors.sent
+        } else {
+            return iMessageColors.received(for: colorScheme)
+        }
+    }
+}
+
+struct MessageBubblePreviewContainer: View {
+    @StateObject private var viewModel = ChatViewModel()
+    @FocusState private var isInputFocused: Bool
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            MessageBubbleView(
+                message: Message(
+                    role: .user,
+                    content: "Hello! Can you help me?",
+                    attachedFileNames: ["document.pdf"]
+                ),
+                viewModel: viewModel,
+                isInputFocused: $isInputFocused
+            )
             
-            if isUser {
-                Button(action: {}) {
-                    Label("Edit", systemImage: "pencil")
-                }
-                .buttonStyle(.bordered)
-            } else {
-                Button(action: {}) {
-                    Label("Retry", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-            }
+            MessageBubbleView(
+                message: Message(
+                    role: .assistant,
+                    content: "Of course! I'm here to help. What would you like to know?",
+                    reasoning: ["Analyzing query", "Preparing response"]
+                ),
+                viewModel: viewModel,
+                isInputFocused: $isInputFocused
+            )
         }
-        .controlSize(.small)
-        .foregroundStyle(.secondary)
-    }
-    
-    // MARK: - Reasoning Section
-    private var reasoningSection: some View {
-        DisclosureGroup(isExpanded: $showReasoning) {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(message.reasoning.indices, id: \.self) { index in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("\(index + 1)")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.white)
-                            .frame(width: 18, height: 18)
-                            .background(.secondary, in: Circle())
-                        
-                        Text(message.reasoning[index])
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(.top, 8)
-        } label: {
-            Label("Reasoning · \(message.reasoning.count) steps", systemImage: "brain")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .tint(.secondary)
-    }
-    
-    private func copyToClipboard() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(message.content, forType: .string)
+        .padding()
+        .frame(width: 700)
     }
 }
 
 #Preview {
-    VStack(spacing: 16) {
-        MessageBubbleView(message: Message(
-            role: .user,
-            content: "Hello! Can you help me?",
-            attachedFileNames: ["document.pdf"]
-        ))
-        
-        MessageBubbleView(message: Message(
-            role: .assistant,
-            content: "Of course! I'm here to help. What would you like to know?",
-            reasoning: ["Analyzing query", "Preparing response"]
-        ))
-    }
-    .padding()
-    .frame(width: 700)
+    MessageBubblePreviewContainer()
 }

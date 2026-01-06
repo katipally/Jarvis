@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 class ConversationStorage {
     static let shared = ConversationStorage()
     private let userDefaults = UserDefaults.standard
