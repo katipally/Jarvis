@@ -67,12 +67,13 @@ struct JarvisAIApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     static var shared: AppDelegate?
     var statusItem: NSStatusItem?
-    var popover: NSPopover?
+    var focusPanel: NSPanel?
     var eventMonitor: Any?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
         setupMenuBar()
+        setupFocusPanel()
         setupNotifications()
     }
     
@@ -91,19 +92,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Add tooltip
             button.toolTip = "Jarvis AI - Click to open Focus Mode"
         }
+    }
+    
+    private func setupFocusPanel() {
+        // Create floating panel that stays on top of all windows (like Cluely/Zoom)
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 520),
+            styleMask: [.nonactivatingPanel, .titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
         
-        // Create popover with Control Center style
-        popover = NSPopover()
-        popover?.contentSize = NSSize(width: 380, height: 520)
-        popover?.behavior = .transient
-        popover?.animates = true
+        // Configure panel to float above all apps
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false  // Don't hide when switching apps
+        panel.titlebarAppearsTransparent = true
+        panel.titleVisibility = .hidden
+        panel.isMovableByWindowBackground = true
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
         
-        // Use appearance matching system
-        popover?.appearance = NSAppearance(named: .vibrantDark)
+        // Set appearance
+        panel.appearance = NSAppearance(named: .vibrantDark)
         
+        // Add SwiftUI content
         let hostingController = NSHostingController(rootView: FocusPanelView())
         hostingController.view.layer?.cornerRadius = 12
-        popover?.contentViewController = hostingController
+        hostingController.view.layer?.masksToBounds = true
+        panel.contentViewController = hostingController
+        
+        // Position near menu bar on the right side
+        positionPanelNearMenuBar(panel)
+        
+        self.focusPanel = panel
+    }
+    
+    private func positionPanelNearMenuBar(_ panel: NSPanel) {
+        guard let screen = NSScreen.main else { return }
+        
+        let screenFrame = screen.visibleFrame
+        let panelWidth: CGFloat = 380
+        let panelHeight: CGFloat = 520
+        
+        // Position in top-right corner, below menu bar
+        let x = screenFrame.maxX - panelWidth - 20
+        let y = screenFrame.maxY - panelHeight - 10
+        
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
     
     private func createJarvisMenuBarIcon() -> NSImage {
@@ -151,20 +189,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc func toggleFocusPanel() {
-        guard let button = statusItem?.button, let popover = popover else { return }
+        guard let panel = focusPanel else { return }
         
-        if popover.isShown {
+        if panel.isVisible {
             closeFocusPanel()
         } else {
-            openFocusPanel(relativeTo: button)
+            openFocusPanel()
         }
     }
     
     // Track the main window for reliable restoration
     private var mainWindowRef: NSWindow?
     
-    private func openFocusPanel(relativeTo button: NSStatusBarButton) {
-        guard let popover = popover else { return }
+    private func openFocusPanel() {
+        guard let panel = focusPanel else { return }
         
         // Find and store reference to main chat window before minimizing
         for window in NSApp.windows {
@@ -174,51 +212,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         
-        // Show popover below the menu bar button
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // Position and show the floating panel
+        positionPanelNearMenuBar(panel)
+        panel.orderFrontRegardless()
+        panel.makeKey()
         
-        // Make popover key window for immediate interaction
-        popover.contentViewController?.view.window?.makeKey()
-        
-        // Close when clicking outside
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            if let popover = self?.popover, popover.isShown {
-                // Check if click is outside popover
-                if let popoverWindow = popover.contentViewController?.view.window {
-                    let clickLocation = event.locationInWindow
-                    if !popoverWindow.frame.contains(NSEvent.mouseLocation) {
-                        self?.closeFocusPanel()
-                    }
-                }
-            }
-        }
+        // No event monitor needed - panel stays visible when clicking outside
     }
     
     private func closeFocusPanel() {
-        popover?.performClose(nil)
-        if let eventMonitor = eventMonitor {
-            NSEvent.removeMonitor(eventMonitor)
-            self.eventMonitor = nil
-        }
+        focusPanel?.orderOut(nil)
     }
     
     @objc func handleOpenFocusMode() {
-        guard let button = statusItem?.button else { return }
-        
-        if let popover = popover, !popover.isShown {
-            openFocusPanel(relativeTo: button)
+        if let panel = focusPanel, !panel.isVisible {
+            openFocusPanel()
         }
     }
     
     func openFocusMode() {
-        guard let button = statusItem?.button else { return }
-        
-        // Close if already open
-        if let popover = popover, popover.isShown {
-            return
+        // Show panel if not already visible
+        if let panel = focusPanel, !panel.isVisible {
+            openFocusPanel()
         }
-        
-        openFocusPanel(relativeTo: button)
     }
     
     func openMainWindow() {
@@ -260,10 +276,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    /// Check if window is the main chat window (not popover, settings, or menu bar item)
+    /// Check if window is the main chat window (not focus panel, settings, or menu bar item)
     private func isMainChatWindow(_ window: NSWindow) -> Bool {
-        // Exclude popover windows
-        if window == popover?.contentViewController?.view.window {
+        // Exclude focus panel
+        if window == focusPanel {
             return false
         }
         

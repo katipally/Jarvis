@@ -1,61 +1,84 @@
 # 🤖 Jarvis AI Assistant
 
-**Professional AI Assistant for macOS** - Powered by GPT-4o
+**AI Assistant with Full macOS Control** - Your personal Mac automation companion
 
-✅ Real-time streaming chat | ✅ File analysis (PDF, images, code) | ✅ Web search | ✅ RAG database | ✅ macOS liquid glass UI
-
----
-
-## 📚 **[READ COMPLETE DOCUMENTATION →](COMPLETE_DOCUMENTATION.md)**
-
-**All guides consolidated into one file for easy reference.**
+✅ Mac Control via AppleScript | ✅ Always-on-top Focus Mode | ✅ Real-time Streaming | ✅ File Analysis | ✅ Web Search | ✅ Native macOS UI
 
 ---
 
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![macOS](https://img.shields.io/badge/macOS-13.0+-black.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 ## Features
 
-🧠 **GPT-5-nano Brain** - Powered by OpenAI's latest model with reasoning capabilities  
-🔄 **Real-time Streaming** - See responses as they're generated  
-💭 **Visible Reasoning** - Understand how the AI thinks  
-📁 **Multi-format Files** - Process PDF, images, documents, code  
-🗄️ **RAG Memory** - Remember and search uploaded documents  
-🌐 **Web Search** - Access current information via DuckDuckGo  
-🎨 **Modern UI** - Native macOS app with SwiftUI  
-🔧 **LangGraph Orchestration** - Intelligent tool routing and workflow management
+### 🖥️ **Mac Control (NEW)**
+Control your Mac through natural language:
+- **Apps**: Open, quit, switch between applications
+- **System**: Volume, brightness, dark mode, notifications
+- **Media**: Play/pause music, skip tracks, control playback
+- **Browser**: Open URLs, get current page info
+- **Files**: Create folders, open files, navigate Finder
+- **Productivity**: Calendar events, reminders, notes
+- **56 pre-built automation scripts** with AI-adaptive execution
+
+### 🎯 **Focus Mode (Always-on-Top)**
+- Floating panel stays on top of all apps (like Cluely/Zoom)
+- Quick access from menu bar
+- Doesn't close when switching apps
+- Liquid glass transparent UI
+- Control your Mac while working in any app
+
+### 💬 **Chat Mode**
+- Full-window conversational interface
+- Conversation history with sidebar
+- File attachments and analysis
+- Markdown rendering with code highlighting
+
+### 🧠 **AI Capabilities**
+- **GPT-5-nano** powered responses with reasoning
+- **Real-time streaming** - see responses as generated
+- **RAG Memory** - search uploaded documents
+- **Web Search** - access current information
+- **Multi-format files** - PDF, images, documents, code
+
+### 🛡️ **Safety Guardrails**
+- **Blocks all destructive operations** (delete, remove, trash)
+- Cannot access keychain or passwords
+- Cannot shutdown/restart system
+- Safe by design - even if you ask, it won't delete files
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│     Swift 6 / SwiftUI Frontend      │
-│     (macOS Native Application)      │
-└─────────────────┬───────────────────┘
-                  │ HTTP/SSE
-┌─────────────────▼───────────────────┐
-│       FastAPI Backend Server        │
-│   - REST API & WebSocket endpoints  │
-│   - File handling & validation      │
-└─────────────────┬───────────────────┘
-                  │
-┌─────────────────▼───────────────────┐
-│      LangGraph Orchestrator         │
-│   - Agent workflow management       │
-│   - Tool routing & coordination     │
-└────┬────────────┬──────────┬────────┘
-     │            │          │
-┌────▼─────┐ ┌───▼────┐ ┌──▼──────┐
-│ GPT-5    │ │ Chroma │ │  File   │
-│ -nano    │ │   DB   │ │Processor│
-└──────────┘ └────────┘ └─────────┘
-                         │
-                    ┌────▼────┐
-                    │DuckDuck │
-                    │   Go    │
-                    └─────────┘
+┌─────────────────────────────────────────────────────────┐
+│              Swift 6 / SwiftUI Frontend                 │
+│  ┌─────────────────┐    ┌─────────────────────────┐    │
+│  │   Chat Mode     │    │  Focus Mode (Floating)  │    │
+│  │  (Full Window)  │    │   (Always-on-Top)       │    │
+│  └─────────────────┘    └─────────────────────────┘    │
+└─────────────────────────┬───────────────────────────────┘
+                          │ HTTP/SSE
+┌─────────────────────────▼───────────────────────────────┐
+│                FastAPI Backend Server                    │
+└─────────────────────────┬───────────────────────────────┘
+                          │
+┌─────────────────────────▼───────────────────────────────┐
+│              LangGraph Orchestrator                      │
+│         (Agent workflow & tool routing)                  │
+└───┬──────────┬──────────┬──────────┬───────────────────┘
+    │          │          │          │
+┌───▼────┐ ┌──▼───┐ ┌────▼────┐ ┌───▼──────────────┐
+│ GPT-5  │ │Chroma│ │  File   │ │  Mac Automation  │
+│ -nano  │ │  DB  │ │Processor│ │   (AppleScript)  │
+└────────┘ └──────┘ └─────────┘ └──────────────────┘
+                          │              │
+                     ┌────▼────┐    ┌────▼────┐
+                     │DuckDuck │    │ 56 Pre- │
+                     │   Go    │    │ built   │
+                     └─────────┘    │ Scripts │
+                                    └─────────┘
 ```
 
 ## Quick Start
@@ -203,9 +226,28 @@ Editor → Format → Format File
 
 ## Tools Available to AI
 
-1. **search_knowledge_base** - Search stored documents using semantic similarity
-2. **web_search** - Search the internet using DuckDuckGo
-3. **process_uploaded_file** - Extract and analyze file content
+### Knowledge & Search
+- **search_knowledge_base** - Search stored documents using semantic similarity
+- **web_search** - Search the internet using DuckDuckGo
+- **process_uploaded_file** - Extract and analyze file content
+
+### Mac Automation (NEW)
+- **run_mac_script** - Execute pre-defined automation scripts (56 available)
+- **execute_applescript** - Run custom AppleScript code
+- **execute_shell_command** - Run safe shell commands
+- **get_available_mac_scripts** - Discover available automation scripts
+
+### Example Commands
+```
+"What's my battery level?"
+"Open Safari and go to github.com"
+"Play some music"
+"Toggle dark mode"
+"Set volume to 50%"
+"What apps are running?"
+"Create a reminder to call mom"
+"What's on my calendar today?"
+```
 
 ## Performance
 

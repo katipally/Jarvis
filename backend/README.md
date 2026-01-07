@@ -1,117 +1,116 @@
 # Jarvis AI Assistant - Backend
 
-Modern AI assistant backend built with FastAPI, LangGraph, and GPT-5-nano.
+Modern AI assistant backend with **Mac Control capabilities** via AppleScript.
+
+Built with FastAPI, LangGraph, and GPT-5-nano.
 
 ## Quick Start
 
-### 1. Setup Environment
-
 ```bash
-# Create virtual environment
+# Setup
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
+source venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 2. Configure Environment Variables
-
-```bash
-# Copy example env file
+# Configure
 cp .env.example .env
+# Edit .env: OPENAI_API_KEY=sk-...
 
-# Edit .env and add your OpenAI API key
-# OPENAI_API_KEY=sk-...
-```
-
-### 3. Run Server
-
-```bash
-# Development mode
+# Run
 python main.py
-
-# Or with uvicorn
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Server starts at `http://localhost:8000`
+
+## Features
+
+### Core
+- ✅ GPT-5-nano with streaming responses
+- ✅ LangGraph orchestration
+- ✅ ChromaDB RAG system
+- ✅ DuckDuckGo web search
+- ✅ Multi-format file processing
+
+### Mac Automation (NEW)
+- ✅ **56 pre-built AppleScript automations**
+- ✅ App control (open, quit, switch)
+- ✅ System control (volume, dark mode, notifications)
+- ✅ Media control (Music app)
+- ✅ Browser control (Safari, Chrome)
+- ✅ Productivity (Calendar, Reminders, Notes)
+- ✅ Safety guardrails (blocks delete/remove operations)
 
 ## API Endpoints
-
-### Health Check
-```
-GET /health
-```
 
 ### Chat (Streaming)
 ```
 POST /api/chat/stream
-Content-Type: application/json
-
-{
-  "message": "Hello, how are you?",
-  "include_reasoning": true
-}
-```
-
-### Chat (Non-streaming)
-```
-POST /api/chat
-Content-Type: application/json
-
-{
-  "message": "Hello, how are you?"
-}
+{"messages": [{"role": "user", "content": "Open Safari"}]}
 ```
 
 ### File Upload
 ```
 POST /api/files/upload
 Content-Type: multipart/form-data
-
-file: <binary data>
 ```
 
-## Features
-
-- ✅ GPT-5-nano integration with streaming
-- ✅ LangGraph orchestration
-- ✅ Multi-format file processing (PDF, images, documents)
-- ✅ ChromaDB RAG system
-- ✅ DuckDuckGo web search
-- ✅ Real-time streaming responses
-- ✅ Reasoning display support
+### Health
+```
+GET /health
+```
 
 ## Architecture
 
 ```
 backend/
-├── main.py              # FastAPI app entry
-├── core/               # Core utilities
-│   ├── config.py       # Configuration
-│   ├── logger.py       # Logging
-│   ├── openai_client.py # OpenAI wrapper
-│   └── chroma_client.py # ChromaDB wrapper
-├── agents/             # LangGraph agents
-│   ├── state.py        # Agent state
-│   ├── tools.py        # Tool definitions
-│   └── graph.py        # Agent graph
-├── api/                # API layer
-│   ├── models.py       # Pydantic models
-│   └── routes/         # API routes
-└── services/           # Business logic
-    ├── file_processor/ # File processing
-    └── search_service.py # Web search
+├── main.py                    # FastAPI entry
+├── core/                      # Core utilities
+│   ├── config.py              # Configuration
+│   ├── chroma_client.py       # Vector DB
+│   └── logger.py              # Logging
+├── agents/                    # LangGraph agents
+│   ├── graph.py               # Agent workflow
+│   ├── tools.py               # All tools (including Mac automation)
+│   └── state.py               # Agent state
+├── api/routes/                # API endpoints
+│   ├── chat.py                # Chat streaming
+│   └── files.py               # File upload
+└── services/
+    ├── mac_automation/        # Mac control (NEW)
+    │   ├── executor.py        # AppleScript executor + guardrails
+    │   └── scripts.py         # 56 pre-built scripts
+    ├── file_processor/        # File processing
+    └── search_service.py      # Web search
 ```
+
+## Mac Automation Tools
+
+| Tool | Description |
+|------|-------------|
+| `run_mac_script` | Execute pre-defined scripts (preferred) |
+| `execute_applescript` | Run custom AppleScript |
+| `execute_shell_command` | Run shell commands |
+| `get_available_mac_scripts` | List available scripts |
+
+### Script Categories
+- **system**: Battery, WiFi, volume, dark mode, notifications
+- **apps**: Open, quit, list running, switch focus
+- **media**: Music play/pause/skip, current track
+- **browser**: Safari/Chrome URL control
+- **finder**: Create folders, open files
+- **productivity**: Calendar, reminders, notes
+
+### Safety Guardrails
+The following operations are **always blocked**:
+- `delete`, `remove`, `trash` commands
+- `rm`, `rmdir` shell commands
+- Keychain/password access
+- System shutdown/restart
 
 ## Development
 
 ```bash
-# Run tests
-pytest
-
-# Format code
-black .
-
-# Type checking
-mypy .
+pytest           # Run tests
+black .          # Format code
+mypy .           # Type check
 ```

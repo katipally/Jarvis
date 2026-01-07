@@ -23,17 +23,12 @@ struct FocusPanelView: View {
             // Chat Content
             FocusChatArea(viewModel: viewModel, isInputFocused: $isInputFocused)
             
-            // Same input pill as Chat window
+            // Liquid Glass input pill - edge to edge, no margins
             FocusInputPill(viewModel: viewModel, isInputFocused: $isInputFocused)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
         }
         .frame(width: 380, height: 520)
         .background(
-            ZStack {
-                VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-                Color.black.opacity(0.2)
-            }
+            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -340,15 +335,15 @@ struct FocusMessageRow: View {
     }
 }
 
-// MARK: - Focus Input Pill (Same style as Chat window)
+// MARK: - Focus Input Pill (Liquid Glass style matching Chat window)
 struct FocusInputPill: View {
     @ObservedObject var viewModel: ChatViewModel
     @FocusState.Binding var isInputFocused: Bool
     @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        VStack(spacing: 6) {
-            // Attached files preview
+        VStack(spacing: 0) {
+            // Attached files preview - above the input
             if !viewModel.attachedFiles.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -372,23 +367,25 @@ struct FocusInputPill: View {
                             .foregroundStyle(.blue)
                         }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             
-            // Main input pill - matching chat window style
+            // Main input - Liquid Glass style, edge-to-edge
             HStack(alignment: .bottom, spacing: 0) {
                 // Attach Button
                 Button(action: { viewModel.showFilePicker = true }) {
                     Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 22))
+                        .font(.system(size: 24))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.white.opacity(0.6))
                 }
                 .buttonStyle(.plain)
                 .disabled(viewModel.isLoading)
-                .padding(.leading, 8)
-                .padding(.bottom, 7)
+                .padding(.leading, 12)
+                .padding(.bottom, 10)
                 .fileImporter(
                     isPresented: $viewModel.showFilePicker,
                     allowedContentTypes: [.pdf, .plainText, .image, .png, .jpeg],
@@ -402,12 +399,12 @@ struct FocusInputPill: View {
                 // Text Input
                 TextField("Ask anything...", text: $viewModel.inputText, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .lineLimit(1...4)
                     .focused($isInputFocused)
                     .disabled(viewModel.isSending)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 14)
                     .onSubmit { sendMessage() }
                 
                 // Send/Stop Button
@@ -420,20 +417,27 @@ struct FocusInputPill: View {
                         }
                     }) {
                         Image(systemName: viewModel.isLoading ? "stop.circle.fill" : "arrow.up.circle.fill")
-                            .font(.system(size: 26))
+                            .font(.system(size: 28))
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(viewModel.isLoading ? .red : .blue)
                     }
                     .buttonStyle(.plain)
-                    .padding(.trailing, 6)
-                    .padding(.bottom, 5)
+                    .padding(.trailing, 10)
+                    .padding(.bottom, 8)
                     .transition(.scale.combined(with: .opacity))
                 }
             }
             .background(
-                Capsule()
-                    .fill(Color.white.opacity(0.12))
-                    .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 0.5))
+                // Liquid Glass effect - shows content behind
+                VisualEffectView(material: .hudWindow, blendingMode: .withinWindow)
+                    .overlay(
+                        Rectangle()
+                            .fill(Color.white.opacity(0.05))
+                    )
+                    .overlay(
+                        Rectangle()
+                            .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                    )
             )
         }
         .animation(.spring(response: 0.3), value: viewModel.inputText.isEmpty)
