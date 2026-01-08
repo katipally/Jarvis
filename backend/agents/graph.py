@@ -14,11 +14,18 @@ logger = setup_logger(__name__)
 def create_agent_graph():
     """Create the LangGraph agent workflow."""
     
-    llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
-        api_key=settings.OPENAI_API_KEY,
-        streaming=True
-    )
+    # GPT-5 models don't support temperature parameter
+    llm_kwargs = {
+        "model": settings.OPENAI_MODEL,
+        "api_key": settings.OPENAI_API_KEY,
+        "streaming": True
+    }
+    
+    # Only add temperature for non-GPT-5 models
+    if not settings.OPENAI_MODEL.startswith("gpt-5"):
+        llm_kwargs["temperature"] = 0.7
+    
+    llm = ChatOpenAI(**llm_kwargs)
     
     tools = get_tools()
     llm_with_tools = llm.bind_tools(tools)

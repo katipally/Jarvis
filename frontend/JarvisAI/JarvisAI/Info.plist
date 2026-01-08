@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Microphone Permission -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Jarvis needs microphone access for voice conversations and commands.</string>
+    
+    <!-- Speech Recognition Permission -->
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Jarvis uses on-device speech recognition to understand your voice commands.</string>
+    
+    <!-- Audio Input for AVAudioEngine -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

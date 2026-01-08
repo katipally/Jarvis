@@ -47,12 +47,48 @@ struct JarvisAIApp: App {
                 .keyboardShortcut(",", modifiers: .command)
             }
             
+            CommandMenu("Conversation") {
+                Button("Toggle Input Mode") {
+                    NotificationCenter.default.post(name: NSNotification.Name("ToggleInputMode"), object: nil)
+                }
+                .keyboardShortcut("m", modifiers: [.control, .option])  // Ctrl+Opt+M for Mode
+                
+                Button("Calibrate Microphone") {
+                    NotificationCenter.default.post(name: NSNotification.Name("StartCalibration"), object: nil)
+                }
+                .keyboardShortcut("b", modifiers: [.control, .option])  // Ctrl+Opt+B for caliB
+                
+                Button("Stop Speaking") {
+                    NotificationCenter.default.post(name: NSNotification.Name("StopSpeaking"), object: nil)
+                }
+                .keyboardShortcut("s", modifiers: [.control, .option])  // Ctrl+Opt+S for Stop
+                
+                Divider()
+                
+                Button("Clear History") {
+                    NotificationCenter.default.post(name: NSNotification.Name("ClearConversation"), object: nil)
+                }
+                .keyboardShortcut(.delete, modifiers: [.command, .shift])  // Cmd+Shift+Delete
+                
+                Button("Push to Talk") {
+                    NotificationCenter.default.post(name: NSNotification.Name("PushToTalk"), object: nil)
+                }
+                .keyboardShortcut("r", modifiers: [.control, .option])  // Ctrl+Opt+R for Record
+                
+                Divider()
+                
+                Button("Voice Settings") {
+                    NotificationCenter.default.post(name: NSNotification.Name("OpenVoiceSettings"), object: nil)
+                }
+                .keyboardShortcut("v", modifiers: [.control, .option])  // Ctrl+Opt+V for Voice
+            }
+            
             CommandGroup(after: .pasteboard) {
                 Divider()
                 Button("Focus Input") {
                     NotificationCenter.default.post(name: NSNotification.Name("FocusInput"), object: nil)
                 }
-                .keyboardShortcut("k", modifiers: .command)
+                .keyboardShortcut("l", modifiers: .command)  // Cmd+L for Line/Focus
             }
         }
         
@@ -95,10 +131,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func setupFocusPanel() {
-        // Create floating panel that stays on top of all windows (like Cluely/Zoom)
+        // Create floating panel - borderless for clean look, no traffic light buttons
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 520),
-            styleMask: [.nonactivatingPanel, .titled, .closable, .fullSizeContentView],
+            styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -108,8 +144,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false  // Don't hide when switching apps
-        panel.titlebarAppearsTransparent = true
-        panel.titleVisibility = .hidden
         panel.isMovableByWindowBackground = true
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -118,10 +152,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Set appearance
         panel.appearance = NSAppearance(named: .vibrantDark)
         
-        // Add SwiftUI content
-        let hostingController = NSHostingController(rootView: FocusPanelView())
+        // Add SwiftUI content - Unified Panel with Focus/Conversation modes
+        let hostingController = NSHostingController(rootView: UnifiedPanelView())
         hostingController.view.layer?.cornerRadius = 12
         hostingController.view.layer?.masksToBounds = true
+        hostingController.view.wantsLayer = true
         panel.contentViewController = hostingController
         
         // Position near menu bar on the right side
@@ -220,7 +255,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // No event monitor needed - panel stays visible when clicking outside
     }
     
-    private func closeFocusPanel() {
+    func closeFocusPanel() {
         focusPanel?.orderOut(nil)
     }
     
