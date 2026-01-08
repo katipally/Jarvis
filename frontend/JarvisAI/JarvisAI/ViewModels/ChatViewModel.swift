@@ -64,6 +64,18 @@ class ChatViewModel: ObservableObject {
     init() {
         loadConversations()
         setupStreamingObservers()
+        setupConversationObserver()
+    }
+    
+    private func setupConversationObserver() {
+        // Listen for voice conversation updates
+        NotificationCenter.default.addObserver(
+            forName: .conversationsDidUpdate,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.loadConversations()
+        }
     }
     
     private func setupStreamingObservers() {

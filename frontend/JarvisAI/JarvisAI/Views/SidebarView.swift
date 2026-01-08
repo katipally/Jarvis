@@ -177,20 +177,36 @@ struct ConversationRow: View {
     let onDelete: () -> Void
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(conversation.title)
-                .font(.system(size: 13, weight: .medium))
-                .lineLimit(1)
+        HStack(spacing: 8) {
+            // Chat type icons
+            HStack(spacing: 2) {
+                Image(systemName: conversation.chatType.icon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(conversation.chatType == .text ? .blue : .green)
+                
+                if let secondaryIcon = conversation.chatType.secondaryIcon {
+                    Image(systemName: secondaryIcon)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.green)
+                }
+            }
+            .frame(width: 24)
             
-            // Show time since last message, not updatedAt
-            if let lastMessageDate = conversation.messages.last?.createdAt {
-                Text(lastMessageDate, style: .relative)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            } else {
-                Text(conversation.updatedAt, style: .relative)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(conversation.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                
+                // Show time since last message, not updatedAt
+                if let lastMessageDate = conversation.messages.last?.createdAt {
+                    Text(lastMessageDate, style: .relative)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text(conversation.updatedAt, style: .relative)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
         .padding(.vertical, 4)
