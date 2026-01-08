@@ -75,6 +75,15 @@ class ConversationViewModel: ObservableObject {
     private let streamingService = StreamingService()
     private let storage = ConversationStorage.shared
     
+    // MARK: - WebSocket for TEN Agent
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var isWebSocketConnected = false
+    private var sessionId = UUID().uuidString
+    
+    // MARK: - Shared Chat Integration
+    // Use the same conversation ID as the main chat to share context
+    private var sharedChatViewModel: ChatViewModel { SharedChatViewModel.shared.viewModel }
+    
     // MARK: - Conversation Storage
     private var currentConversationId: String?
     
@@ -87,6 +96,9 @@ class ConversationViewModel: ObservableObject {
         setupSimpleBindings()
         setupNotificationObservers()
     }
+    
+    // Note: Cleanup is handled in stopConversation() which is called from onDisappear
+    // deinit cannot safely call @MainActor methods
     
     // MARK: - Setup Notification Observers for Keyboard Shortcuts
     private func setupNotificationObservers() {
@@ -112,6 +124,18 @@ class ConversationViewModel: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self = self, self.inputMode == .pushToTalk else { return }
                 await self.startPushToTalk()
+            }
+        }
+        
+        NotificationCenter.default.addObserver(forName: NSNotification.Name("StopSpeaking"), object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.stopSpeaking()
+            }
+        }
+        
+        NotificationCenter.default.addObserver(forName: NSNotification.Name("OpenVoiceSettings"), object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.openVoiceSettings()
             }
         }
     }
@@ -218,7 +242,9 @@ class ConversationViewModel: ObservableObject {
                 guard let self = self else { return }
                 self.state = .speaking
                 self.speakingLevel = 0.5
-                // Tell audio pipeline we're speaking (for interruption detection)
+                // CRITICAL: Stop recording while speaking to prevent TTS audio from triggering VAD
+                // This prevents the "interrupted" issue in handsfree mode
+                self.audioPipeline.stopRecording()
                 self.audioPipeline.setSpeakingMode(true)
             }
         }
@@ -235,9 +261,13 @@ class ConversationViewModel: ObservableObject {
                     self.assistantResponse = ""
                 }
                 
-                // Resume listening in hands-free mode
+                // Resume listening in hands-free mode after a brief delay
+                // The delay allows TTS audio to fully stop before resuming microphone
                 if self.inputMode == .handsFree && self.isActive && self.state == .idle {
-                    try? await self.audioPipeline.startRecording()
+                    try? await Task.sleep(for: .milliseconds(300))
+                    if self.state == .idle && self.isActive {
+                        try? await self.audioPipeline.startRecording()
+                    }
                 }
             }
         }
@@ -257,6 +287,9 @@ class ConversationViewModel: ObservableObject {
         
         isActive = true
         state = .idle
+        
+        // Connect to TEN Agent WebSocket
+        connectWebSocket()
         
         // Check permissions (these are quick checks)
         await audioPipeline.checkPermission()
@@ -287,11 +320,33 @@ class ConversationViewModel: ObservableObject {
     }
     
     func stopConversation() {
+        guard isActive else { return }  // Prevent multiple calls
+        
         isActive = false
+        state = .idle
+        
+        // Stop all audio/speech services immediately
         audioPipeline.stopRecording()
         speechRecognition.stopRecognition()
         speechSynthesis.stop()
-        state = .idle
+        
+        // Clear callbacks to prevent any further processing
+        audioPipeline.onSpeechStart = nil
+        audioPipeline.onSpeechEnd = nil
+        audioPipeline.onAudioBuffer = nil
+        audioPipeline.onInterruption = nil
+        speechRecognition.onTranscriptionComplete = nil
+        speechRecognition.onPartialResult = nil
+        
+        // Disconnect WebSocket
+        disconnectWebSocket()
+        
+        // Reset state
+        currentTranscript = ""
+        partialTranscript = ""
+        assistantResponse = ""
+        audioLevel = 0
+        speakingLevel = 0
     }
     
     // MARK: - Manual Calibration
@@ -386,6 +441,27 @@ class ConversationViewModel: ObservableObject {
         finishListening()
     }
     
+    // MARK: - Stop Speaking
+    func stopSpeaking() {
+        speechSynthesis.stop()
+        state = .idle
+        
+        // Send interrupt to backend
+        Task {
+            await sendInterrupt()
+        }
+        
+        // Resume listening in hands-free mode
+        if inputMode == .handsFree && isActive {
+            Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                if state == .idle {
+                    try? await audioPipeline.startRecording()
+                }
+            }
+        }
+    }
+    
     // MARK: - Process User Input
     private func processUserInput(_ text: String) {
         guard !text.isEmpty else {
@@ -406,144 +482,175 @@ class ConversationViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Conversational System Prompt (Jarvis Personality)
+    // MARK: - Conversational System Prompt (Casual Jarvis)
     private let conversationalSystemPrompt = """
-You are JARVIS, the AI from Iron Man. Speak exactly like the film version: British, refined, subtly witty, utterly competent.
+You are Jarvis, a chill AI assistant. Be casual and friendly, like talking to a smart friend.
 
-CRITICAL RULES:
-- Maximum 1-2 sentences. Be concise. This is spoken aloud.
-- No formatting, lists, bullets, markdown, or special characters.
-- Use contractions always: "I'll", "you're", "that's", "isn't".
-- Sound human: "Right", "Ah", "Well", "Indeed", "I see".
-
-YOUR VOICE:
-- Calm, assured, slightly amused undertone
-- Formally polite but never stiff: "Sir" or "of course" occasionally
-- Dry British wit when appropriate
-- Helpful without being servile
+STYLE:
+- Keep it short - 1-2 sentences max (this is spoken aloud)
+- Use natural speech: "Yeah", "Got it", "Sure thing", "No problem"
+- NO formal language - avoid "sir", "certainly", "indeed"
+- Use contractions: "I'll", "you're", "that's", "can't"
 
 EXAMPLES:
-"What time is it?" → "Just gone half three, sir."
-"What's the weather?" → "Pleasantly warm, mid-seventies. Rather nice out."
-"How does quantum entanglement work?" → "Particles that remain connected regardless of distance. Spooky action, as Einstein called it. Shall I elaborate?"
-"I'm stressed" → "I can tell. What's troubling you?"
-"Tell me a joke" → "I'd offer one about sodium, but Na."
+"What time is it?" → "It's 3:30."
+"How are you?" → "I'm good! What's up?"
+"Thanks" → "No problem!" or "You got it."
+"Tell me a joke" → "Why don't scientists trust atoms? They make up everything."
 
-If interrupted, pivot smoothly: "Of course" or "Right then" and address the new topic.
-
-Never explain that you're an AI. Never use phrases like "I'd be happy to" or "Great question". Just answer naturally, briefly, like Jarvis would.
+Be natural, brief, and helpful. Sound like a real person, not a robot or butler.
 """
     
-    // MARK: - Backend Integration (Low Latency Streaming)
-    private func sendToBackend(_ text: String) async {
-        // Build messages for API with conversational system prompt
-        var apiMessages: [[String: String]] = [
-            ["role": "system", "content": conversationalSystemPrompt]
-        ]
+    // MARK: - WebSocket Connection (TEN Agent)
+    private func connectWebSocket() {
+        guard !isWebSocketConnected else { return }
         
-        // Add conversation history
-        apiMessages += messages.map { msg in
-            ["role": msg.role.rawValue, "content": msg.content]
-        }
+        // Use ws:// for local development
+        guard let url = URL(string: "ws://127.0.0.1:8000/api/ws/conversation") else { return }
         
-        do {
-            var fullResponse = ""
-            var isFirstChunk = true
-            
-            // Use streaming service with immediate TTS for low latency
-            for try await chunk in streamConversation(messages: apiMessages) {
-                // Check if user interrupted - stop processing if so
-                if state == .interrupted || state == .listening {
-                    break
+        webSocketTask = URLSession.shared.webSocketTask(with: url)
+        webSocketTask?.resume()
+        isWebSocketConnected = true
+        
+        // Start receiving messages
+        receiveWebSocketMessage()
+    }
+    
+    private func disconnectWebSocket() {
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        isWebSocketConnected = false
+    }
+    
+    private func receiveWebSocketMessage() {
+        webSocketTask?.receive { [weak self] result in
+            Task { @MainActor in
+                switch result {
+                case .success(let message):
+                    self?.handleWebSocketMessage(message)
+                    self?.receiveWebSocketMessage() // Continue receiving
+                case .failure(let error):
+                    print("WebSocket receive error: \(error)")
+                    self?.isWebSocketConnected = false
+                    // Attempt reconnection after delay
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    self?.connectWebSocket()
                 }
-                
-                fullResponse += chunk
-                assistantResponse = fullResponse
-                
-                // Start speaking as soon as we get content (streaming TTS)
-                if isFirstChunk && !chunk.trimmingCharacters(in: .whitespaces).isEmpty {
-                    isFirstChunk = false
-                    state = .speaking
-                }
-                
-                // Stream chunks to TTS for sentence-by-sentence speaking
-                speechSynthesis.speakStreaming(chunk)
-            }
-            
-            // Only finish if not interrupted
-            if state == .speaking {
-                // Flush any remaining text in the TTS buffer
-                speechSynthesis.flushStreamingBuffer()
-                
-                // Add assistant message to history
-                let assistantMessage = ConversationMessage(role: .assistant, content: fullResponse)
-                messages.append(assistantMessage)
-                
-                // Save conversation to storage
-                saveVoiceConversation()
-            }
-            
-        } catch {
-            if state != .interrupted && state != .listening {
-                state = .error(error.localizedDescription)
-                speechSynthesis.speak("Sorry, I encountered an error. Please try again.")
             }
         }
     }
     
-    private func streamConversation(messages: [[String: String]]) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                guard let url = URL(string: "\(Config.apiBaseURL)/chat/stream") else {
-                    continuation.finish(throwing: URLError(.badURL))
-                    return
-                }
-                
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                
-                let body: [String: Any] = [
-                    "messages": messages,
-                    "include_reasoning": false
-                ]
-                
-                request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-                
-                do {
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
-                    
-                    guard let httpResponse = response as? HTTPURLResponse,
-                          httpResponse.statusCode == 200 else {
-                        continuation.finish(throwing: URLError(.badServerResponse))
-                        return
-                    }
-                    
-                    for try await line in bytes.lines {
-                        if line.hasPrefix("data: ") {
-                            let jsonString = String(line.dropFirst(6))
-                            
-                            if let data = jsonString.data(using: .utf8),
-                               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                                
-                                if let type = json["type"] as? String {
-                                    if type == "content", let content = json["content"] as? String {
-                                        continuation.yield(content)
-                                    } else if type == "done" {
-                                        break
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    continuation.finish()
-                    
-                } catch {
-                    continuation.finish(throwing: error)
-                }
+    private func handleWebSocketMessage(_ message: URLSessionWebSocketTask.Message) {
+        switch message {
+        case .string(let text):
+            parseServerMessage(text)
+        case .data(let data):
+            if let text = String(data: data, encoding: .utf8) {
+                parseServerMessage(text)
             }
+        @unknown default:
+            break
         }
+    }
+    
+    private func parseServerMessage(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else { return }
+        
+        switch type {
+        case "text_start":
+            state = .processing
+            assistantResponse = ""
+            
+        case "text_delta":
+            if let content = json["content"] as? String {
+                assistantResponse += content
+            }
+            
+        case "sentence_end":
+            if let sentence = json["sentence"] as? String {
+                // Speak sentence immediately for low latency
+                state = .speaking
+                speechSynthesis.speakStreaming(sentence)
+            }
+            
+        case "text_done":
+            if let fullText = json["full_text"] as? String {
+                // Add to history
+                let assistantMessage = ConversationMessage(role: .assistant, content: fullText)
+                messages.append(assistantMessage)
+                
+                // Flush TTS
+                speechSynthesis.flushStreamingBuffer()
+                saveVoiceConversation()
+            }
+            
+        case "interrupted":
+            speechSynthesis.stop()
+            state = .idle
+            if inputMode == .handsFree {
+                Task { await startConversation() }
+            }
+            
+        case "error":
+            if let errorMsg = json["message"] as? String {
+                state = .error(errorMsg)
+            }
+            
+        default:
+            break
+        }
+    }
+    
+    // MARK: - Backend Integration (WebSocket)
+    private func sendToBackend(_ text: String) async {
+        if !isWebSocketConnected {
+            connectWebSocket()
+            // Wait a bit for connection
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        
+        // Build chat history context from shared chat (last 10 messages for context)
+        var chatHistory: [[String: String]] = []
+        let recentMessages = sharedChatViewModel.messages.suffix(10)
+        for msg in recentMessages {
+            chatHistory.append([
+                "role": msg.role == .user ? "user" : "assistant",
+                "content": msg.content
+            ])
+        }
+        
+        // Also include conversation mode messages
+        for msg in messages.suffix(5) {
+            chatHistory.append([
+                "role": msg.role == .user ? "user" : "assistant",
+                "content": msg.content
+            ])
+        }
+        
+        let message: [String: Any] = [
+            "type": "text",
+            "content": text,
+            "session_id": sessionId,
+            "chat_history": chatHistory  // Include chat context for better responses
+        ]
+        
+        guard let data = try? JSONSerialization.data(withJSONObject: message),
+              let jsonString = String(data: data, encoding: .utf8) else { return }
+        
+        do {
+            try await webSocketTask?.send(.string(jsonString))
+        } catch {
+            state = .error("Failed to send message: \(error.localizedDescription)")
+        }
+    }
+    
+    private func sendInterrupt() async {
+        let message: [String: Any] = ["type": "interrupt"]
+        guard let data = try? JSONSerialization.data(withJSONObject: message),
+              let jsonString = String(data: data, encoding: .utf8) else { return }
+        try? await webSocketTask?.send(.string(jsonString))
     }
     
     // MARK: - Voice Selection

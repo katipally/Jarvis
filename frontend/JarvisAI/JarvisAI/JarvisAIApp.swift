@@ -58,6 +58,11 @@ struct JarvisAIApp: App {
                 }
                 .keyboardShortcut("b", modifiers: [.control, .option])  // Ctrl+Opt+B for caliB
                 
+                Button("Stop Speaking") {
+                    NotificationCenter.default.post(name: NSNotification.Name("StopSpeaking"), object: nil)
+                }
+                .keyboardShortcut("s", modifiers: [.control, .option])  // Ctrl+Opt+S for Stop
+                
                 Divider()
                 
                 Button("Clear History") {
@@ -69,6 +74,13 @@ struct JarvisAIApp: App {
                     NotificationCenter.default.post(name: NSNotification.Name("PushToTalk"), object: nil)
                 }
                 .keyboardShortcut("r", modifiers: [.control, .option])  // Ctrl+Opt+R for Record
+                
+                Divider()
+                
+                Button("Voice Settings") {
+                    NotificationCenter.default.post(name: NSNotification.Name("OpenVoiceSettings"), object: nil)
+                }
+                .keyboardShortcut("v", modifiers: [.control, .option])  // Ctrl+Opt+V for Voice
             }
             
             CommandGroup(after: .pasteboard) {

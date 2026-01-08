@@ -281,17 +281,26 @@ struct ConversationModeContent: View {
             Menu {
                 Section("Select Voice") {
                     ForEach(viewModel.availableVoices.prefix(15)) { voice in
+                        // Select voice button
                         Button(action: { 
                             viewModel.selectVoice(voice.identifier)
                         }) {
                             HStack {
+                                // Selected indicator
+                                if voice.identifier == viewModel.selectedVoiceId {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                } else {
+                                    Image(systemName: "circle")
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                // Quality indicator
                                 Image(systemName: voice.qualityIcon)
                                     .foregroundStyle(voice.quality == "Premium" ? .yellow : .secondary)
+                                
                                 Text(voice.displayName)
-                                Spacer()
-                                if voice.identifier == viewModel.selectedVoiceId {
-                                    Image(systemName: "checkmark")
-                                }
+                                    .fontWeight(voice.identifier == viewModel.selectedVoiceId ? .semibold : .regular)
                             }
                         }
                     }
@@ -299,9 +308,10 @@ struct ConversationModeContent: View {
                 
                 Divider()
                 
-                Section("Preview") {
+                Section("Preview Voice") {
+                    // Preview currently selected voice
                     Button(action: { viewModel.previewSelectedVoice() }) {
-                        Label("Preview Voice", systemImage: "play.circle")
+                        Label("Preview Selected Voice", systemImage: "play.circle.fill")
                     }
                 }
                 
@@ -311,6 +321,7 @@ struct ConversationModeContent: View {
                     Button(action: { viewModel.openVoiceSettings() }) {
                         Label("Download Premium Voices", systemImage: "arrow.down.circle")
                     }
+                    .keyboardShortcut("v", modifiers: [.control, .option])
                     
                     Button(action: { viewModel.refreshVoices() }) {
                         Label("Refresh Voice List", systemImage: "arrow.clockwise")
@@ -320,9 +331,13 @@ struct ConversationModeContent: View {
                 HStack(spacing: 4) {
                     Image(systemName: "speaker.wave.2.fill")
                         .font(.system(size: 11))
-                    if !viewModel.hasPremiumVoices {
+                    if viewModel.selectedVoiceId.isEmpty {
                         Circle()
                             .fill(.orange)
+                            .frame(width: 5, height: 5)
+                    } else {
+                        Circle()
+                            .fill(.green)
                             .frame(width: 5, height: 5)
                     }
                 }
@@ -330,7 +345,7 @@ struct ConversationModeContent: View {
                 .padding(5)
             }
             .menuStyle(.borderlessButton)
-            .help("Voice settings")
+            .help("Voice settings (⌃⌥V)")
             
             // Expand button
             Button(action: { AppDelegate.shared?.openMainWindow() }) {
