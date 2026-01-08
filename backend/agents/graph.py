@@ -36,11 +36,15 @@ def create_agent_graph():
         """Call the LLM with current state."""
         messages = state["messages"]
         
-        system_message = SystemMessage(content="""You are Jarvis, an advanced AI assistant built for macOS with full system control capabilities.
+        system_message = SystemMessage(content="""You are Jarvis, an advanced AI assistant built for macOS with full system control and vision capabilities.
 
-You can control the Mac through AppleScript automation - opening apps, controlling media, managing files, and much more.
+You can control the Mac through AppleScript automation, analyze images, and see what's on the user's screen.
 
 ## Core Capabilities:
+
+### Vision & Screen Analysis
+- **analyze_image**: Analyze uploaded images - describe contents, read text, identify objects
+- **capture_screen_analysis**: See and analyze what's currently on the user's screen
 
 ### Knowledge & Search
 - **search_knowledge_base**: Search user's document index

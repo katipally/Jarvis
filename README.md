@@ -1,8 +1,8 @@
 # 🤖 Jarvis AI Assistant
 
-**AI Assistant with Full macOS Control** - Your personal Mac automation companion
+**AI Assistant with Full macOS Control & Vision** - Your personal Mac automation companion
 
-✅ Mac Control via AppleScript | ✅ Always-on-top Focus Mode | ✅ Real-time Streaming | ✅ File Analysis | ✅ Web Search | ✅ Native macOS UI
+✅ Vision & Screen Analysis | ✅ Mac Control via AppleScript | ✅ Always-on-top Focus Mode | ✅ Real-time Streaming | ✅ File Analysis | ✅ Web Search | ✅ Native macOS UI
 
 ---
 
@@ -13,7 +13,14 @@
 
 ## Features
 
-### 🖥️ **Mac Control (NEW)**
+### 👁️ **Vision & Screen Analysis (NEW)**
+See and understand visual content:
+- **Screen Analysis**: "What's on my screen?" - Jarvis can see and describe your current screen
+- **Image Analysis**: Upload images and ask questions about them
+- **Text Recognition**: Read and extract text from screenshots and images
+- **Visual Q&A**: Ask specific questions about visual content
+
+### 🖥️ **Mac Control**
 Control your Mac through natural language:
 - **Apps**: Open, quit, switch between applications
 - **System**: Volume, brightness, dark mode, notifications
@@ -226,12 +233,16 @@ Editor → Format → Format File
 
 ## Tools Available to AI
 
+### Vision & Screen
+- **analyze_image** - Analyze uploaded images, describe contents, read text
+- **capture_screen_analysis** - Capture and analyze current screen content
+
 ### Knowledge & Search
 - **search_knowledge_base** - Search stored documents using semantic similarity
 - **web_search** - Search the internet using DuckDuckGo
 - **process_uploaded_file** - Extract and analyze file content
 
-### Mac Automation (NEW)
+### Mac Automation
 - **run_mac_script** - Execute pre-defined automation scripts (56 available)
 - **execute_applescript** - Run custom AppleScript code
 - **execute_shell_command** - Run safe shell commands
@@ -239,6 +250,12 @@ Editor → Format → Format File
 
 ### Example Commands
 ```
+# Vision
+"What's on my screen?"
+"Describe this image"
+"Read the text in this screenshot"
+
+# Mac Control
 "What's my battery level?"
 "Open Safari and go to github.com"
 "Play some music"
@@ -281,12 +298,14 @@ For moderate usage (~10K messages/month):
 
 ## Roadmap
 
-- [ ] Voice input/output
+- [x] Vision & screen analysis
+- [x] Mac automation via AppleScript
+- [ ] Wake word detection ("Hey Jarvis")
+- [ ] Voice conversation mode
 - [ ] Multi-user support
 - [ ] iOS companion app
 - [ ] Browser extension
-- [ ] Custom model fine-tuning
-- [ ] Advanced analytics dashboard
+- [ ] Long-term memory across sessions
 
 ## Contributing
 

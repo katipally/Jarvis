@@ -6,6 +6,9 @@ from services.file_processor import file_processor_factory
 from services.mac_automation import mac_automation, script_kb
 from pathlib import Path
 from core.logger import setup_logger
+from core.config import settings
+import base64
+import httpx
 
 logger = setup_logger(__name__)
 
@@ -299,6 +302,148 @@ def get_available_mac_scripts(category: Optional[str] = None) -> str:
         return f"Error: {str(e)}"
 
 
+@tool
+async def analyze_image(image_path_or_url: str, question: str = "What's in this image?") -> str:
+    """
+    Analyze an image using OpenAI's vision capabilities.
+    
+    Args:
+        image_path_or_url: Path to local image file or URL to image
+        question: Question to ask about the image
+    
+    Returns:
+        Description and analysis of the image
+    """
+    try:
+        # Determine if it's a URL or local file
+        if image_path_or_url.startswith(('http://', 'https://')):
+            # It's a URL
+            image_content = {"type": "image_url", "image_url": {"url": image_path_or_url}}
+        else:
+            # It's a local file - read and encode as base64
+            file_path = Path(image_path_or_url)
+            if not file_path.exists():
+                # Check in uploads directory
+                upload_path = Path(settings.UPLOAD_DIR) / image_path_or_url
+                if upload_path.exists():
+                    file_path = upload_path
+                else:
+                    # Try to find by file_id
+                    upload_dir = Path(settings.UPLOAD_DIR)
+                    matching = list(upload_dir.glob(f"{image_path_or_url}.*"))
+                    if matching:
+                        file_path = matching[0]
+                    else:
+                        return f"Image file not found: {image_path_or_url}"
+            
+            # Read and encode the image
+            with open(file_path, "rb") as f:
+                image_data = base64.b64encode(f.read()).decode("utf-8")
+            
+            # Determine media type
+            suffix = file_path.suffix.lower()
+            media_types = {
+                ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".png": "image/png", ".gif": "image/gif",
+                ".webp": "image/webp", ".bmp": "image/bmp"
+            }
+            media_type = media_types.get(suffix, "image/jpeg")
+            
+            image_content = {
+                "type": "image_url",
+                "image_url": {"url": f"data:{media_type};base64,{image_data}"}
+            }
+        
+        # Call OpenAI Vision API
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": settings.OPENAI_MODEL,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": question},
+                                image_content
+                            ]
+                        }
+                    ],
+                    "max_tokens": 1000
+                },
+                timeout=60.0
+            )
+            
+            if response.status_code != 200:
+                return f"Vision API error: {response.text}"
+            
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+    
+    except Exception as e:
+        logger.error(f"Image analysis error: {str(e)}")
+        return f"Error analyzing image: {str(e)}"
+
+
+@tool
+async def capture_screen_analysis(question: str = "What's on my screen?") -> str:
+    """
+    Capture and analyze the current screen content.
+    This tool takes a screenshot and analyzes it using vision AI.
+    
+    Args:
+        question: Question to ask about the screen content
+    
+    Returns:
+        Analysis of what's visible on screen
+    """
+    try:
+        import subprocess
+        import tempfile
+        import os
+        
+        # Create temp file for screenshot
+        temp_dir = tempfile.gettempdir()
+        screenshot_path = os.path.join(temp_dir, "jarvis_screenshot.png")
+        
+        # Capture screen using macOS screencapture
+        result = subprocess.run(
+            ["screencapture", "-x", "-C", screenshot_path],
+            capture_output=True,
+            timeout=10
+        )
+        
+        if result.returncode != 0:
+            return "Failed to capture screen. Make sure screen recording permission is granted."
+        
+        if not os.path.exists(screenshot_path):
+            return "Screenshot file was not created."
+        
+        # Analyze the screenshot
+        analysis = await analyze_image.ainvoke({
+            "image_path_or_url": screenshot_path,
+            "question": question
+        })
+        
+        # Clean up
+        try:
+            os.remove(screenshot_path)
+        except:
+            pass
+        
+        return analysis
+    
+    except subprocess.TimeoutExpired:
+        return "Screen capture timed out."
+    except Exception as e:
+        logger.error(f"Screen capture error: {str(e)}")
+        return f"Error capturing screen: {str(e)}"
+
+
 def get_tools():
     """Return list of available tools."""
     return [
@@ -306,6 +451,9 @@ def get_tools():
         search_knowledge_base, 
         web_search, 
         process_uploaded_file,
+        # Vision & Screen
+        analyze_image,
+        capture_screen_analysis,
         # Mac Automation
         run_mac_script,
         execute_applescript,
