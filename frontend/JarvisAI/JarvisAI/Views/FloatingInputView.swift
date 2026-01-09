@@ -4,6 +4,8 @@ struct FloatingInputBar: View {
     @ObservedObject var viewModel: ChatViewModel
     @FocusState.Binding var isInputFocused: Bool
     @Environment(\.colorScheme) var colorScheme
+    // Use local state for file picker to prevent conflicts with Focus mode
+    @State private var showChatFilePicker = false
     
     var body: some View {
         VStack(spacing: 8) {
@@ -24,8 +26,8 @@ struct FloatingInputBar: View {
             
             // Main input bar
             HStack(alignment: .bottom, spacing: 0) {
-                // Attach Button - Inside the pill on the left
-                Button(action: { viewModel.showFilePicker = true }) {
+                // Attach Button - uses local state to avoid conflict with Focus mode
+                Button(action: { showChatFilePicker = true }) {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 24))
                         .symbolRenderingMode(.hierarchical)
@@ -36,7 +38,7 @@ struct FloatingInputBar: View {
                 .padding(.leading, 8)
                 .padding(.bottom, 8)
                 .fileImporter(
-                    isPresented: $viewModel.showFilePicker,
+                    isPresented: $showChatFilePicker,
                     allowedContentTypes: [.pdf, .plainText, .image, .png, .jpeg],
                     allowsMultipleSelection: true
                 ) { result in

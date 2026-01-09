@@ -68,14 +68,18 @@ class ChatViewModel: ObservableObject {
     }
     
     private func setupConversationObserver() {
-        // Listen for voice conversation updates
-        NotificationCenter.default.addObserver(
-            forName: .conversationsDidUpdate,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.loadConversations()
-        }
+        // Listen for voice conversation updates using Combine publisher
+        // Use RunLoop.main scheduler which is MainActor-compatible in Swift 6
+        NotificationCenter.default.publisher(for: .conversationsDidUpdate)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                // Already on MainActor due to RunLoop.main, safe to call directly
+                Task { @MainActor [weak self] in
+                    self?.loadConversations()
+                }
+            }
+            .store(in: &cancellables)
     }
     
     private func setupStreamingObservers() {
@@ -206,35 +210,34 @@ class ChatViewModel: ObservableObject {
     func sendMessage() async {
         guard canSend else { return }
         
-        isSending = true
-        isLoading = true
-        currentTokenCount = 0
-        
+        // Capture input immediately and clear UI for responsive feel
         let trimmedText = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filesToUpload = attachedFiles
         let fileNames = attachedFiles.map { $0.lastPathComponent }
         
-        let messageText = trimmedText
+        // Clear input immediately for responsive UI
         inputText = ""
         attachedFiles = []
+        
+        // Set loading state
+        isSending = true
+        isLoading = true
+        currentTokenCount = 0
         
         if currentConversationId == nil {
             createNewConversation()
         }
         
-        var fileIds: [String] = []
-        if !filesToUpload.isEmpty {
-            fileIds = await uploadFiles(filesToUpload)
-        }
-        
+        // Show user message immediately with placeholder file IDs
         let userMessage = Message(
             role: .user,
-            content: messageText.isEmpty ? "Attached files" : messageText,
-            attachedFileIds: fileIds,
+            content: trimmedText.isEmpty ? "Attached files" : trimmedText,
+            attachedFileIds: [],  // Will be populated after upload
             attachedFileNames: fileNames
         )
         messages.append(userMessage)
         
+        // Show assistant placeholder immediately
         let assistantMessage = Message(
             role: .assistant,
             content: "",
@@ -245,7 +248,19 @@ class ChatViewModel: ObservableObject {
         currentAssistantMessageId = assistantMessage.id
         messages.append(assistantMessage)
         
-        await streamingService.sendMessage(messageText, fileIds: fileIds)
+        // Upload files in background if needed
+        var fileIds: [String] = []
+        if !filesToUpload.isEmpty {
+            fileIds = await uploadFiles(filesToUpload)
+            
+            // Update user message with actual file IDs
+            if let index = messages.firstIndex(where: { $0.id == userMessage.id }) {
+                messages[index].attachedFileIds = fileIds
+            }
+        }
+        
+        // Send to API
+        await streamingService.sendMessage(trimmedText, fileIds: fileIds)
     }
     
     // MARK: - Regenerate Message

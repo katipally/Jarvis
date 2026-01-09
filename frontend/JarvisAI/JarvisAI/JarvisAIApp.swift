@@ -131,15 +131,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func setupFocusPanel() {
-        // Create floating panel - borderless for clean look, no traffic light buttons
+        // Create floating panel that accepts keyboard input
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 520),
-            styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
+            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         
-        // Configure panel to float above all apps
+        // Configure panel to float above all apps AND accept keyboard input
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.isFloatingPanel = true
@@ -148,6 +148,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
+        panel.titlebarAppearsTransparent = true
+        panel.titleVisibility = .hidden
+        
+        // CRITICAL: Allow panel to become key window for keyboard input
+        panel.becomesKeyOnlyIfNeeded = false
         
         // Set appearance
         panel.appearance = NSAppearance(named: .vibrantDark)
@@ -239,11 +244,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func openFocusPanel() {
         guard let panel = focusPanel else { return }
         
-        // Find and store reference to main chat window before minimizing
+        // Find and store reference to main chat window, then hide it completely
         for window in NSApp.windows {
             if window.isVisible && window.canBecomeMain && isMainChatWindow(window) {
                 mainWindowRef = window
-                window.miniaturize(nil)
+                // Use orderOut instead of miniaturize for cleaner transition
+                window.orderOut(nil)
             }
         }
         
@@ -251,12 +257,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         positionPanelNearMenuBar(panel)
         panel.orderFrontRegardless()
         panel.makeKey()
-        
-        // No event monitor needed - panel stays visible when clicking outside
     }
     
     func closeFocusPanel() {
         focusPanel?.orderOut(nil)
+        
+        // Restore main window when focus panel closes
+        if let mainWindow = mainWindowRef {
+            mainWindow.makeKeyAndOrderFront(nil)
+        }
     }
     
     @objc func handleOpenFocusMode() {

@@ -18,14 +18,19 @@ struct MessageBubbleView: View {
                 Spacer(minLength: 80) 
             }
             
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
-                // File Previews
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+                // iMessage-style: Files stacked directly above message content
                 if !message.attachedFileNames.isEmpty {
-                    FilePreviewRow(
-                        fileNames: message.attachedFileNames,
-                        fileIds: message.attachedFileIds,
-                        isUser: message.role == .user
-                    )
+                    VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+                        ForEach(Array(message.attachedFileNames.enumerated()), id: \.offset) { index, fileName in
+                            FileAttachmentBubble(
+                                fileName: fileName,
+                                fileId: index < message.attachedFileIds.count ? message.attachedFileIds[index] : nil,
+                                isUser: message.role == .user,
+                                colorScheme: colorScheme
+                            )
+                        }
+                    }
                 }
                 
                 // Message Bubble with Markdown
@@ -160,6 +165,75 @@ struct MessageBubbleContent: View {
     }
 }
 
+// MARK: - File Attachment Bubble (iMessage style)
+struct FileAttachmentBubble: View {
+    let fileName: String
+    let fileId: String?
+    let isUser: Bool
+    let colorScheme: ColorScheme
+    @State private var showPreview = false
+    
+    private var isImage: Bool {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "gif", "heic", "webp"].contains(ext)
+    }
+    
+    private var fileIcon: String {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        switch ext {
+        case "pdf": return "doc.fill"
+        case "png", "jpg", "jpeg", "gif", "heic", "webp": return "photo.fill"
+        case "txt", "md": return "doc.text.fill"
+        case "swift", "py", "js", "ts": return "chevron.left.forwardslash.chevron.right"
+        default: return "doc.fill"
+        }
+    }
+    
+    var body: some View {
+        Button(action: { showPreview = true }) {
+            HStack(spacing: 8) {
+                // File icon with background
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isUser ? .white.opacity(0.2) : .blue.opacity(0.15))
+                        .frame(width: 36, height: 36)
+                    
+                    Image(systemName: fileIcon)
+                        .font(.system(size: 16))
+                        .foregroundStyle(isUser ? .white : .blue)
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(fileName)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                    
+                    Text(isImage ? "Image" : "Document")
+                        .font(.system(size: 11))
+                        .foregroundStyle(isUser ? .white.opacity(0.7) : .secondary)
+                }
+                
+                Spacer(minLength: 0)
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(isUser ? .white.opacity(0.5) : .secondary)
+            }
+            .padding(10)
+            .frame(maxWidth: 280)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(isUser ? iMessageColors.sent : iMessageColors.received(for: colorScheme))
+            )
+            .foregroundStyle(isUser ? .white : .primary)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showPreview) {
+            FilePreviewPopover(fileName: fileName, fileId: fileId)
+        }
+    }
+}
+
 struct MessageBubblePreviewContainer: View {
     @StateObject private var viewModel = ChatViewModel()
     @FocusState private var isInputFocused: Bool
@@ -170,7 +244,7 @@ struct MessageBubblePreviewContainer: View {
                 message: Message(
                     role: .user,
                     content: "Hello! Can you help me?",
-                    attachedFileNames: ["document.pdf"]
+                    attachedFileNames: ["document.pdf", "screenshot.png"]
                 ),
                 viewModel: viewModel,
                 isInputFocused: $isInputFocused

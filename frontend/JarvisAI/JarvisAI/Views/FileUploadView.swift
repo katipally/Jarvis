@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct FileUploadView: View {
     @ObservedObject var viewModel: ChatViewModel
     @State private var isDropTargeted = false
+    @State private var showUploadFilePicker = false  // Local state for file picker
     @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
@@ -34,7 +35,7 @@ struct FileUploadView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
                     
-                    Button(action: { viewModel.showFilePicker = true }) {
+                    Button(action: { showUploadFilePicker = true }) {
                         Label("Browse Files", systemImage: "folder")
                             .font(.system(size: 13, weight: .medium))
                     }
@@ -78,7 +79,7 @@ struct FileUploadView: View {
             }
         }
         .fileImporter(
-            isPresented: $viewModel.showFilePicker,
+            isPresented: $showUploadFilePicker,
             allowedContentTypes: [.pdf, .plainText, .image, .png, .jpeg],
             allowsMultipleSelection: true
         ) { result in

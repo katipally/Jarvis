@@ -159,21 +159,32 @@ struct FocusChatArea: View {
     @FocusState.Binding var isInputFocused: Bool
     @Environment(\.colorScheme) var colorScheme
     
+    private var displayMessages: [Message] {
+        viewModel.messages.filter { $0.role != .system }
+    }
+    
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 10) {
-                    if viewModel.messages.isEmpty {
+                VStack(spacing: 10) {
+                    if displayMessages.isEmpty && !viewModel.isLoading {
                         FocusEmptyState()
                             .frame(minHeight: 260)
                     } else {
-                        ForEach(viewModel.messages.filter { $0.role != .system }) { message in
+                        ForEach(displayMessages) { message in
                             FocusMessageRow(message: message, viewModel: viewModel)
                                 .id(message.id)
+                        }
+                        
+                        // Show loading indicator when waiting for response
+                        if viewModel.isLoading && (displayMessages.last?.role == .user || displayMessages.isEmpty) {
+                            FocusLoadingIndicator()
+                                .id("loading")
                         }
                     }
                     
                     Color.clear.frame(height: 8)
+                        .id("bottom")
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
@@ -185,15 +196,55 @@ struct FocusChatArea: View {
             .onChange(of: viewModel.messages.last?.content) { _ in
                 scrollToBottom(proxy)
             }
+            .onChange(of: viewModel.isLoading) { _ in
+                scrollToBottom(proxy)
+            }
         }
     }
     
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.2)) {
-            if let lastId = viewModel.messages.filter({ $0.role != .system }).last?.id {
-                proxy.scrollTo(lastId, anchor: .bottom)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                if viewModel.isLoading {
+                    proxy.scrollTo("loading", anchor: .bottom)
+                } else if let lastId = displayMessages.last?.id {
+                    proxy.scrollTo(lastId, anchor: .bottom)
+                }
             }
         }
+    }
+}
+
+// MARK: - Focus Loading Indicator
+struct FocusLoadingIndicator: View {
+    @State private var animate = false
+    
+    var body: some View {
+        HStack {
+            HStack(spacing: 4) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(Color.white.opacity(0.5))
+                        .frame(width: 6, height: 6)
+                        .scaleEffect(animate ? 1.0 : 0.5)
+                        .animation(
+                            .easeInOut(duration: 0.5)
+                            .repeatForever()
+                            .delay(Double(index) * 0.15),
+                            value: animate
+                        )
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.12))
+            )
+            
+            Spacer()
+        }
+        .onAppear { animate = true }
     }
 }
 
@@ -241,6 +292,7 @@ struct FocusMessageRow: View {
     @ObservedObject var viewModel: ChatViewModel
     @Environment(\.colorScheme) var colorScheme
     @State private var isHovering = false
+    @State private var selectedFileForPreview: String?
     
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -248,22 +300,16 @@ struct FocusMessageRow: View {
                 Spacer(minLength: 50)
             }
             
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-                // Attachments
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
+                // File Attachments - larger, clickable previews
                 if !message.attachedFileNames.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(message.attachedFileNames.prefix(2), id: \.self) { name in
-                            Label(name, systemImage: "paperclip")
-                                .font(.system(size: 9))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Capsule().fill(Color.blue.opacity(0.2)))
-                                .foregroundStyle(.blue)
-                        }
-                        if message.attachedFileNames.count > 2 {
-                            Text("+\(message.attachedFileNames.count - 2)")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
+                    VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+                        ForEach(Array(message.attachedFileNames.enumerated()), id: \.offset) { index, fileName in
+                            FocusFileAttachmentView(
+                                fileName: fileName,
+                                fileId: index < message.attachedFileIds.count ? message.attachedFileIds[index] : nil,
+                                isUser: message.role == .user
+                            )
                         }
                     }
                 }
@@ -340,6 +386,8 @@ struct FocusInputPill: View {
     @ObservedObject var viewModel: ChatViewModel
     @FocusState.Binding var isInputFocused: Bool
     @Environment(\.colorScheme) var colorScheme
+    // Use local state for file picker to avoid conflicts with main chat window
+    @State private var showFocusFilePicker = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -375,8 +423,8 @@ struct FocusInputPill: View {
             
             // Main input - Liquid Glass style, edge-to-edge
             HStack(alignment: .bottom, spacing: 0) {
-                // Attach Button
-                Button(action: { viewModel.showFilePicker = true }) {
+                // Attach Button - uses local state to avoid conflict with main window
+                Button(action: { showFocusFilePicker = true }) {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 24))
                         .symbolRenderingMode(.hierarchical)
@@ -387,7 +435,7 @@ struct FocusInputPill: View {
                 .padding(.leading, 12)
                 .padding(.bottom, 10)
                 .fileImporter(
-                    isPresented: $viewModel.showFilePicker,
+                    isPresented: $showFocusFilePicker,
                     allowedContentTypes: [.pdf, .plainText, .image, .png, .jpeg],
                     allowsMultipleSelection: true
                 ) { result in
@@ -396,7 +444,7 @@ struct FocusInputPill: View {
                     }
                 }
                 
-                // Text Input
+                // Text Input - explicitly allow typing in panel
                 TextField("Ask anything...", text: $viewModel.inputText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
@@ -406,6 +454,12 @@ struct FocusInputPill: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 14)
                     .onSubmit { sendMessage() }
+                    .onAppear {
+                        // Auto-focus input when view appears
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            isInputFocused = true
+                        }
+                    }
                 
                 // Send/Stop Button
                 if !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.attachedFiles.isEmpty || viewModel.isLoading {
@@ -450,6 +504,153 @@ struct FocusInputPill: View {
             await viewModel.sendMessage()
             isInputFocused = true
         }
+    }
+}
+
+// MARK: - Focus File Attachment View (Larger, Clickable Preview)
+struct FocusFileAttachmentView: View {
+    let fileName: String
+    let fileId: String?
+    let isUser: Bool
+    @State private var showPreview = false
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var isImage: Bool {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "gif", "heic", "webp"].contains(ext)
+    }
+    
+    private var fileIcon: String {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        switch ext {
+        case "pdf": return "doc.fill"
+        case "png", "jpg", "jpeg", "gif", "heic", "webp": return "photo.fill"
+        case "txt", "md": return "doc.text.fill"
+        case "swift", "py", "js", "ts": return "chevron.left.forwardslash.chevron.right"
+        default: return "doc.fill"
+        }
+    }
+    
+    var body: some View {
+        Button(action: { showPreview = true }) {
+            HStack(spacing: 8) {
+                // File icon
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isUser ? .white.opacity(0.2) : .blue.opacity(0.15))
+                        .frame(width: 32, height: 32)
+                    
+                    Image(systemName: fileIcon)
+                        .font(.system(size: 14))
+                        .foregroundStyle(isUser ? .white : .blue)
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(fileName)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                    
+                    Text(isImage ? "Tap to preview" : "Document")
+                        .font(.system(size: 9))
+                        .foregroundStyle(isUser ? .white.opacity(0.7) : .secondary)
+                }
+                
+                Spacer(minLength: 0)
+                
+                Image(systemName: "eye")
+                    .font(.system(size: 10))
+                    .foregroundStyle(isUser ? .white.opacity(0.5) : .secondary)
+            }
+            .padding(8)
+            .frame(maxWidth: 200)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isUser ? Color.blue.opacity(0.8) : Color.white.opacity(0.12))
+            )
+            .foregroundStyle(isUser ? .white : .primary)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showPreview) {
+            FocusFilePreviewPopover(fileName: fileName, fileId: fileId)
+        }
+    }
+}
+
+// MARK: - Focus File Preview Popover (Larger Preview)
+struct FocusFilePreviewPopover: View {
+    let fileName: String
+    let fileId: String?
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var isImage: Bool {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "gif", "heic", "webp"].contains(ext)
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: isImage ? "photo.fill" : "doc.fill")
+                    .foregroundStyle(.blue)
+                Text(fileName)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(12)
+            .background(Color.gray.opacity(0.1))
+            
+            Divider()
+            
+            // Preview content
+            if isImage, let fileId = fileId {
+                // Show image preview from server
+                AsyncImage(url: URL(string: "http://127.0.0.1:8000/api/files/\(fileId)/preview")) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 350, maxHeight: 400)
+                    case .failure:
+                        VStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 32))
+                                .foregroundStyle(.orange)
+                            Text("Failed to load preview")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(width: 250, height: 200)
+                    case .empty:
+                        ProgressView()
+                            .frame(width: 250, height: 200)
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+                .padding(12)
+            } else {
+                // Document preview placeholder
+                VStack(spacing: 12) {
+                    Image(systemName: "doc.text.fill")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.blue.opacity(0.6))
+                    
+                    Text(fileName)
+                        .font(.system(size: 14, weight: .medium))
+                    
+                    Text("Document attached to message")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 250, height: 180)
+                .padding(12)
+            }
+        }
+        .frame(minWidth: 280)
+        .background(colorScheme == .dark ? Color.black.opacity(0.9) : Color.white)
     }
 }
 
