@@ -10,6 +10,13 @@ from core.logger import setup_logger
 logger = setup_logger(__name__)
 
 
+def escape_applescript(text: str) -> str:
+    """Escape special characters for AppleScript strings."""
+    if not isinstance(text, str):
+        return str(text)
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
 @tool
 async def search_knowledge_base(query: str, top_k: int = 5) -> str:
     """
@@ -135,20 +142,40 @@ async def run_mac_script(script_id: str, parameters: Optional[Dict[str, Any]] = 
     
     This is the PRIMARY tool for controlling macOS. Use script IDs from the knowledge base.
     
-    Available script categories:
-    - SYSTEM: system_get_info, system_get_battery, system_get_wifi, system_toggle_dark_mode, 
-              system_set_volume, system_mute, system_notification, system_say, system_sleep_display
-    - APPS: app_open, app_quit, app_list_running, app_hide, app_get_frontmost
-    - FINDER: finder_new_window, finder_get_selection, finder_create_folder, finder_open_file
-    - BROWSER: safari_open_url, safari_get_url, chrome_open_url, chrome_get_url
-    - MEDIA: music_play, music_pause, music_next, music_previous, music_current_track, music_play_playlist
-    - PRODUCTIVITY: calendar_today_events, calendar_create_event, reminders_create, reminders_list, notes_create
-    - COMMUNICATION: mail_unread_count, mail_compose, messages_send
-    - UTILITIES: clipboard_get, clipboard_set, terminal_new_tab, spotlight_search, window_minimize_all
+    Available script categories & IDs:
+    
+    - **SYSTEM**: system_get_info, system_get_battery, system_get_wifi, system_toggle_dark_mode, 
+                  system_set_volume, system_mute, system_notification, system_say, system_sleep_display
+    
+    - **APPS**: app_open, app_quit, app_list_running, app_hide, app_get_frontmost
+    
+    - **BROWSER (Generic - works with Safari, Chrome, Arc, etc.)**: 
+      - `browser_open_url` (params: app_name, url)
+      - `browser_get_active_url` (params: app_name)
+      - `browser_get_active_title` (params: app_name)
+      - `browser_new_tab` (params: app_name)
+    
+    - **MEDIA (Generic - works with Music, Spotify, VLC, etc.)**: 
+      - `media_play` (params: app_name)
+      - `media_pause` (params: app_name)
+      - `media_next` (params: app_name)
+      - `media_previous` (params: app_name)
+      - `media_get_info` (params: app_name)
+    
+    - **FINDER**: finder_new_window, finder_get_selection, finder_create_folder, finder_open_file
+    
+    - **PRODUCTIVITY**: 
+      - `notes_create` (params: title, content)
+      - `notes_search_recent` (params: days)
+      - `notes_search_text` (params: query)
+      - calendar_today_events, calendar_create_event, reminders_create, reminders_list
+    
+    - **COMMUNICATION**: mail_unread_count, mail_compose, messages_send
+    - **UTILITIES**: clipboard_get, clipboard_set, terminal_new_tab, spotlight_search, window_minimize_all
     
     Args:
-        script_id: The ID of the script to run (e.g., "music_play", "system_get_battery")
-        parameters: Optional dict of parameters the script needs (e.g., {"volume_level": "50"})
+        script_id: The ID of the script to run (e.g., "media_play", "browser_open_url")
+        parameters: Optional dict of parameters the script needs (e.g., {"app_name": "Spotify", "url": "google.com"})
     
     Returns:
         Result of the script execution
@@ -349,10 +376,11 @@ async def type_text(text: str, use_clipboard: bool = False) -> str:
         Result of the typing action
     """
     try:
+        safe_text = escape_applescript(text)
         if use_clipboard:
             # Use clipboard paste for faster input
             script = f'''
-set the clipboard to "{text}"
+set the clipboard to "{safe_text}"
 tell application "System Events"
     keystroke "v" using command down
 end tell
@@ -362,9 +390,9 @@ return "Pasted text from clipboard"
             # Direct keystroke
             script = f'''
 tell application "System Events"
-    keystroke "{text}"
+    keystroke "{safe_text}"
 end tell
-return "Typed: {text}"
+return "Typed: {safe_text}"
 '''
         
         result = await mac_automation.execute_applescript(script)
@@ -550,20 +578,23 @@ async def click_ui_element(app_name: str, element_type: str, element_name: str) 
         Result of the click action
     """
     try:
+        safe_app = escape_applescript(app_name)
+        safe_element = escape_applescript(element_name)
+        
         if element_type == "button":
             script = f'''
 tell application "System Events"
-    tell process "{app_name}"
+    tell process "{safe_app}"
         set frontmost to true
         try
-            click button "{element_name}" of front window
-            return "Clicked button: {element_name}"
+            click button "{safe_element}" of front window
+            return "Clicked button: {safe_element}"
         on error
             try
-                click button "{element_name}" of group 1 of front window
-                return "Clicked button: {element_name}"
+                click button "{safe_element}" of group 1 of front window
+                return "Clicked button: {safe_element}"
             on error errMsg
-                return "Could not find button '{element_name}': " & errMsg
+                return "Could not find button '{safe_element}': " & errMsg
             end try
         end try
     end tell
@@ -573,11 +604,11 @@ end tell
             # Parse menu path (e.g., "File > Save")
             parts = element_name.split(">")
             if len(parts) >= 2:
-                menu_name = parts[0].strip()
-                menu_item = parts[1].strip()
+                menu_name = escape_applescript(parts[0].strip())
+                menu_item = escape_applescript(parts[1].strip())
                 script = f'''
 tell application "System Events"
-    tell process "{app_name}"
+    tell process "{safe_app}"
         set frontmost to true
         click menu item "{menu_item}" of menu "{menu_name}" of menu bar 1
         return "Clicked menu: {menu_name} > {menu_item}"
@@ -589,20 +620,20 @@ end tell
         elif element_type == "checkbox":
             script = f'''
 tell application "System Events"
-    tell process "{app_name}"
+    tell process "{safe_app}"
         set frontmost to true
-        click checkbox "{element_name}" of front window
-        return "Toggled checkbox: {element_name}"
+        click checkbox "{safe_element}" of front window
+        return "Toggled checkbox: {safe_element}"
     end tell
 end tell
 '''
         elif element_type == "text_field":
             script = f'''
 tell application "System Events"
-    tell process "{app_name}"
+    tell process "{safe_app}"
         set frontmost to true
         set focused of text field 1 of front window to true
-        return "Focused text field in {app_name}"
+        return "Focused text field in {safe_app}"
     end tell
 end tell
 '''
@@ -826,19 +857,20 @@ async def launch_app(app_name: str, activate: bool = True) -> str:
         Result of the launch operation
     """
     try:
+        safe_app = escape_applescript(app_name)
         if activate:
             script = f'''
-tell application "{app_name}"
+tell application "{safe_app}"
     activate
 end tell
-return "Launched and activated {app_name}"
+return "Launched and activated {safe_app}"
 '''
         else:
             script = f'''
-tell application "{app_name}"
+tell application "{safe_app}"
     launch
 end tell
-return "Launched {app_name} in background"
+return "Launched {safe_app} in background"
 '''
         result = await mac_automation.execute_applescript(script)
         if result.success:
@@ -863,20 +895,21 @@ async def quit_app(app_name: str, force: bool = False) -> str:
         Result of the quit operation
     """
     try:
+        safe_app = escape_applescript(app_name)
         if force:
             script = f'''
 tell application "System Events"
-    set targetProc to first application process whose name is "{app_name}"
+    set targetProc to first application process whose name is "{safe_app}"
     do shell script "kill -9 " & (unix id of targetProc)
 end tell
-return "Force quit {app_name}"
+return "Force quit {safe_app}"
 '''
         else:
             script = f'''
-tell application "{app_name}"
+tell application "{safe_app}"
     quit
 end tell
-return "Quit {app_name}"
+return "Quit {safe_app}"
 '''
         result = await mac_automation.execute_applescript(script)
         if result.success:
@@ -900,11 +933,12 @@ async def hide_app(app_name: str) -> str:
         Result of the hide operation
     """
     try:
+        safe_app = escape_applescript(app_name)
         script = f'''
 tell application "System Events"
-    set visible of process "{app_name}" to false
+    set visible of process "{safe_app}" to false
 end tell
-return "Hidden {app_name}"
+return "Hidden {safe_app}"
 '''
         result = await mac_automation.execute_applescript(script)
         if result.success:
@@ -1014,24 +1048,26 @@ async def open_file_or_url(path_or_url: str, with_app: Optional[str] = None) -> 
         Result of the open operation
     """
     try:
+        safe_path = escape_applescript(path_or_url)
         if with_app:
+            safe_app = escape_applescript(with_app)
             script = f'''
-tell application "{with_app}"
+tell application "{safe_app}"
     activate
-    open "{path_or_url}"
+    open "{safe_path}"
 end tell
-return "Opened with {with_app}"
+return "Opened with {safe_app}"
 '''
         else:
             if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
                 script = f'''
-open location "{path_or_url}"
+open location "{safe_path}"
 return "Opened URL in default browser"
 '''
             else:
                 script = f'''
 tell application "Finder"
-    open POSIX file "{path_or_url}"
+    open POSIX file "{safe_path}"
 end tell
 return "Opened file"
 '''
@@ -1057,12 +1093,13 @@ async def reveal_in_finder(path: str) -> str:
         Result of the reveal operation
     """
     try:
+        safe_path = escape_applescript(path)
         script = f'''
 tell application "Finder"
-    reveal POSIX file "{path}"
+    reveal POSIX file "{safe_path}"
     activate
 end tell
-return "Revealed in Finder: {path}"
+return "Revealed in Finder: {safe_path}"
 '''
         result = await mac_automation.execute_applescript(script)
         if result.success:
@@ -1150,14 +1187,16 @@ async def send_system_notification(title: str, message: str, sound: bool = True)
         Result of sending the notification
     """
     try:
+        safe_title = escape_applescript(title)
+        safe_message = escape_applescript(message)
         if sound:
             script = f'''
-display notification "{message}" with title "{title}" sound name "default"
+display notification "{safe_message}" with title "{safe_title}" sound name "default"
 return "Sent notification with sound"
 '''
         else:
             script = f'''
-display notification "{message}" with title "{title}"
+display notification "{safe_message}" with title "{safe_title}"
 return "Sent notification"
 '''
         result = await mac_automation.execute_applescript(script)

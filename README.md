@@ -183,6 +183,13 @@ ollama pull llava
 ollama serve
 ```
 
+### 4. Configuration (Optional)
+
+By default, the app connects to `http://localhost:8000`. To change this (e.g., for deployment):
+
+- **Environment Variable:** Set `JARVIS_API_URL` in your scheme or environment.
+- **Info.plist:** Add a key `JarvisAPIURL` with your backend URL.
+
 ## 📁 Project Structure
 
 ```

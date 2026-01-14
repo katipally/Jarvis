@@ -484,229 +484,198 @@ return "Revealed {file_path} in Finder"
             examples=["Show this file in Finder", "Reveal in Finder"]
         ))
         
-        # ============== BROWSER (Safari) ==============
+        # ============== BROWSER (Generic) ==============
         self._add_script(AutomationScript(
-            id="safari_open_url",
-            name="Open URL in Safari",
-            description="Open a URL in Safari browser",
+            id="browser_open_url",
+            name="Open URL",
+            description="Open a URL in any browser (Safari, Chrome, Arc, Firefox, etc.)",
             category=ScriptCategory.BROWSER,
             script='''
-tell application "Safari"
+tell application "{app_name}"
     activate
-    open location "{url}"
+    try
+        open location "{url}"
+    on error
+        -- Fallback for browsers that might not support 'open location' directly in tell block
+        tell application "System Events" to open location "{url}"
+    end try
 end tell
-return "Opened {url} in Safari"
+return "Opened {url} in {app_name}"
 ''',
             language="applescript",
-            parameters=["url"],
-            examples=["Open google.com", "Go to GitHub", "Open this website"]
+            parameters=["app_name", "url"],
+            examples=["Open google.com in Safari", "Open github.com in Arc", "Go to website in Chrome"]
         ))
         
         self._add_script(AutomationScript(
-            id="safari_get_url",
-            name="Get Current Safari URL",
-            description="Get the URL of the current Safari tab",
+            id="browser_get_active_url",
+            name="Get Active URL",
+            description="Get the URL of the active tab in any browser",
             category=ScriptCategory.BROWSER,
             script='''
-tell application "Safari"
-    return URL of front document
+set appName to "{app_name}"
+tell application appName
+    try
+        if appName contains "Chrome" or appName contains "Brave" or appName contains "Arc" or appName contains "Edge" then
+            return URL of active tab of front window
+        else if appName contains "Safari" or appName contains "Orion" then
+            return URL of front document
+        else
+            -- Try generic 'URL' property which many scriptable apps support
+            return URL of front document
+        end if
+    on error errMsg
+        return "Could not get URL from " & appName & ": " & errMsg
+    end try
 end tell
 ''',
             language="applescript",
-            parameters=[],
-            examples=["What page am I on?", "Get current URL", "What website is this?"]
+            parameters=["app_name"],
+            examples=["Get URL from Safari", "What page is open in Chrome?", "Get current link in Arc"]
         ))
         
         self._add_script(AutomationScript(
-            id="safari_get_title",
-            name="Get Safari Page Title",
-            description="Get the title of the current Safari page",
+            id="browser_get_active_title",
+            name="Get Page Title",
+            description="Get the title of the active tab in any browser",
             category=ScriptCategory.BROWSER,
             script='''
-tell application "Safari"
-    return name of front document
+set appName to "{app_name}"
+tell application appName
+    try
+        if appName contains "Chrome" or appName contains "Brave" or appName contains "Arc" or appName contains "Edge" then
+            return title of active tab of front window
+        else
+            return name of front document
+        end if
+    on error
+        return "Could not get title from " & appName
+    end try
 end tell
 ''',
             language="applescript",
-            parameters=[],
-            examples=["What's this page called?", "Get page title"]
+            parameters=["app_name"],
+            examples=["Get page title in Safari", "What is the tab name in Chrome?"]
         ))
         
         self._add_script(AutomationScript(
-            id="safari_new_tab",
-            name="New Safari Tab",
-            description="Open a new tab in Safari",
+            id="browser_new_tab",
+            name="New Browser Tab",
+            description="Open a new tab in any browser",
             category=ScriptCategory.BROWSER,
             script='''
-tell application "Safari"
+set appName to "{app_name}"
+tell application appName
     activate
-    tell front window
-        set newTab to make new tab
-        set current tab to newTab
-    end tell
+    try
+        if appName contains "Safari" then
+            tell front window to set current tab to (make new tab)
+        else if appName contains "Chrome" or appName contains "Brave" or appName contains "Arc" then
+            make new tab at end of tabs of front window
+        else
+            -- Fallback to keyboard shortcut Cmd+T
+            tell application "System Events" to keystroke "t" using command down
+        end if
+    on error
+        tell application "System Events" to keystroke "t" using command down
+    end try
 end tell
-return "Opened new Safari tab"
+return "Opened new tab in " & appName
 ''',
             language="applescript",
-            parameters=[],
-            examples=["New tab in Safari", "Open new browser tab"]
+            parameters=["app_name"],
+            examples=["New tab in Safari", "Open empty tab in Chrome"]
         ))
         
+        # ============== MEDIA (Generic) ==============
         self._add_script(AutomationScript(
-            id="safari_list_tabs",
-            name="List Safari Tabs",
-            description="Get list of all open Safari tabs",
-            category=ScriptCategory.BROWSER,
-            script='''
-tell application "Safari"
-    set tabList to ""
-    repeat with w in windows
-        repeat with t in tabs of w
-            set tabList to tabList & name of t & " | "
-        end repeat
-    end repeat
-    return tabList
-end tell
-''',
-            language="applescript",
-            parameters=[],
-            examples=["What tabs are open?", "List my Safari tabs"]
-        ))
-        
-        # ============== BROWSER (Chrome) ==============
-        self._add_script(AutomationScript(
-            id="chrome_open_url",
-            name="Open URL in Chrome",
-            description="Open a URL in Google Chrome",
-            category=ScriptCategory.BROWSER,
-            script='''
-tell application "Google Chrome"
-    activate
-    open location "{url}"
-end tell
-return "Opened {url} in Chrome"
-''',
-            language="applescript",
-            parameters=["url"],
-            examples=["Open google.com in Chrome", "Go to GitHub in Chrome"]
-        ))
-        
-        self._add_script(AutomationScript(
-            id="chrome_get_url",
-            name="Get Current Chrome URL",
-            description="Get the URL of the active Chrome tab",
-            category=ScriptCategory.BROWSER,
-            script='''
-tell application "Google Chrome"
-    return URL of active tab of front window
-end tell
-''',
-            language="applescript",
-            parameters=[],
-            examples=["What URL is in Chrome?", "Get Chrome URL"]
-        ))
-        
-        # ============== MEDIA (Music) ==============
-        self._add_script(AutomationScript(
-            id="music_play",
-            name="Play Music",
-            description="Start playing music in Apple Music",
+            id="media_play",
+            name="Play Media",
+            description="Start playing in any media app (Music, Spotify, VLC)",
             category=ScriptCategory.MEDIA,
             script='''
-tell application "Music"
+tell application "{app_name}"
     play
 end tell
-return "Music playing"
+return "{app_name} playing"
 ''',
             language="applescript",
-            parameters=[],
-            examples=["Play music", "Start music", "Resume playback"]
+            parameters=["app_name"],
+            examples=["Play Music", "Start Spotify", "Resume VLC"]
         ))
         
         self._add_script(AutomationScript(
-            id="music_pause",
-            name="Pause Music",
-            description="Pause music in Apple Music",
+            id="media_pause",
+            name="Pause Media",
+            description="Pause playback in any media app",
             category=ScriptCategory.MEDIA,
             script='''
-tell application "Music"
+tell application "{app_name}"
     pause
 end tell
-return "Music paused"
+return "{app_name} paused"
 ''',
             language="applescript",
-            parameters=[],
-            examples=["Pause music", "Stop music", "Pause playback"]
+            parameters=["app_name"],
+            examples=["Pause Music", "Stop Spotify", "Pause playback"]
         ))
         
         self._add_script(AutomationScript(
-            id="music_next",
+            id="media_next",
             name="Next Track",
-            description="Skip to the next track",
+            description="Skip to next track in any media app",
             category=ScriptCategory.MEDIA,
             script='''
-tell application "Music"
+tell application "{app_name}"
     next track
 end tell
-return "Skipped to next track"
+return "Skipped to next track in {app_name}"
 ''',
             language="applescript",
-            parameters=[],
-            examples=["Next song", "Skip track", "Next track"]
+            parameters=["app_name"],
+            examples=["Next song in Music", "Skip track in Spotify"]
         ))
         
         self._add_script(AutomationScript(
-            id="music_previous",
+            id="media_previous",
             name="Previous Track",
-            description="Go to the previous track",
+            description="Go to previous track in any media app",
             category=ScriptCategory.MEDIA,
             script='''
-tell application "Music"
+tell application "{app_name}"
     previous track
 end tell
-return "Went to previous track"
+return "Previous track in {app_name}"
 ''',
             language="applescript",
-            parameters=[],
-            examples=["Previous song", "Go back", "Last track"]
+            parameters=["app_name"],
+            examples=["Previous song in Music", "Go back in Spotify"]
         ))
         
         self._add_script(AutomationScript(
-            id="music_current_track",
-            name="Get Current Track",
-            description="Get info about the currently playing track",
+            id="media_get_info",
+            name="Get Media Info",
+            description="Get info about currently playing track",
             category=ScriptCategory.MEDIA,
             script='''
-tell application "Music"
-    if player state is playing then
-        set trackName to name of current track
-        set artistName to artist of current track
-        set albumName to album of current track
-        return "Now playing: " & trackName & " by " & artistName & " from " & albumName
-    else
-        return "No music currently playing"
-    end if
+set appName to "{app_name}"
+tell application appName
+    try
+        if player state is playing then
+            set trackName to name of current track
+            set trackArtist to artist of current track
+            return "Now playing in " & appName & ": " & trackName & " by " & trackArtist
+        else
+            return appName & " is not playing."
+        end if
+    on error
+        return "Could not get track info from " & appName
+    end try
 end tell
 ''',
             language="applescript",
-            parameters=[],
-            examples=["What song is playing?", "What's this track?", "Current song"]
-        ))
-        
-        self._add_script(AutomationScript(
-            id="music_play_playlist",
-            name="Play Playlist",
-            description="Play a specific playlist by name",
-            category=ScriptCategory.MEDIA,
-            script='''
-tell application "Music"
-    play playlist "{playlist_name}"
-end tell
-return "Playing playlist: {playlist_name}"
-''',
-            language="applescript",
-            parameters=["playlist_name"],
-            examples=["Play my workout playlist", "Play 'Chill' playlist"]
+            parameters=["app_name"],
+            examples=["What's playing in Spotify?", "Current song in Music"]
         ))
         
         # ============== CALENDAR ==============
@@ -815,6 +784,69 @@ return "Created note: {title}"
             language="applescript",
             parameters=["title", "content"],
             examples=["Create a note", "Make new note", "Save this as a note"]
+        ))
+
+        self._add_script(AutomationScript(
+            id="notes_search_recent",
+            name="Search Recent Notes",
+            description="Search for notes modified in the last X days",
+            category=ScriptCategory.PRODUCTIVITY,
+            script='''
+tell application "Notes"
+    set d to current date
+    set searchDate to d - ({days} * days)
+    set results to ""
+    try
+        set recentNotes to (every note whose modification date > searchDate)
+        repeat with n in recentNotes
+            set noteTitle to name of n
+            set noteBody to body of n
+            set results to results & "Title: " & noteTitle & "\\nContent: " & noteBody & "\\n---\\n"
+        end repeat
+    on error
+        return "Error searching notes"
+    end try
+    
+    if results is "" then
+        return "No notes found modified in the last {days} days."
+    else
+        return results
+    end if
+end tell
+''',
+            language="applescript",
+            parameters=["days"],
+            examples=["Show notes from last 7 days", "Recent notes", "What did I write this week?"]
+        ))
+
+        self._add_script(AutomationScript(
+            id="notes_search_text",
+            name="Search Notes by Text",
+            description="Search for notes containing specific text",
+            category=ScriptCategory.PRODUCTIVITY,
+            script='''
+tell application "Notes"
+    set results to ""
+    try
+        set foundNotes to (every note whose body contains "{query}" or name contains "{query}")
+        repeat with n in foundNotes
+            set noteTitle to name of n
+            set results to results & "Title: " & noteTitle & "\\n---\\n"
+        end repeat
+    on error
+        return "Error searching notes"
+    end try
+    
+    if results is "" then
+        return "No notes found containing '{query}'."
+    else
+        return results
+    end if
+end tell
+''',
+            language="applescript",
+            parameters=["query"],
+            examples=["Find notes about 'meeting'", "Search notes for 'budget'"]
         ))
         
         # ============== MAIL ==============
@@ -1834,6 +1866,21 @@ return "Arranged windows side by side"
         
         return summary
     
+    def _escape_applescript_string(self, text: Any) -> str:
+        """Escape special characters for AppleScript strings."""
+        if text is None:
+            return ""
+        if isinstance(text, bool):
+            return "true" if text else "false"
+        if isinstance(text, (list, tuple)):
+            # Recursively escape items and join with comma
+            # This is a best-effort guess for list parameters
+            return ", ".join(self._escape_applescript_string(item) for item in text)
+            
+        text_str = str(text)
+        # Escape backslashes first, then double quotes
+        return text_str.replace("\\", "\\\\").replace('"', '\\"')
+
     def prepare_script(self, script_id: str, parameters: Dict[str, Any]) -> Optional[str]:
         """
         Prepare a script for execution by substituting parameters.
@@ -1852,7 +1899,9 @@ return "Arranged windows side by side"
         prepared = script.script
         for param, value in parameters.items():
             placeholder = "{" + param + "}"
-            prepared = prepared.replace(placeholder, str(value))
+            # Escape the value before substitution to prevent syntax errors
+            escaped_value = self._escape_applescript_string(str(value))
+            prepared = prepared.replace(placeholder, escaped_value)
         
         return prepared.strip()
 

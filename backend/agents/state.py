@@ -6,6 +6,7 @@ from langgraph.graph.message import add_messages
 class AgentState(TypedDict):
     """State schema for the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    system_prompt: str  # Custom system prompt/personality override
     reasoning: List[str]
     tool_calls: List[Dict[str, Any]]
     file_context: Dict[str, Any]

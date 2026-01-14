@@ -14,7 +14,7 @@ class FileProcessor(ABC):
         Returns:
             Dict with keys: text, metadata, chunks, images (optional)
         """
-        pass
+        raise NotImplementedError("Subclasses must implement process()")
     
     def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
         """Split text into overlapping chunks."""

@@ -221,7 +221,8 @@ class ConversationViewModel: ObservableObject {
                     if self.inputMode == .handsFree && self.isActive {
                         Task {
                             try? await Task.sleep(for: .milliseconds(200))
-                            if self.state == .idle {
+                            // CRITICAL: Check isActive again to prevent race condition on exit
+                            if self.state == .idle && self.isActive {
                                 try? await self.audioPipeline.startRecording()
                             }
                         }
@@ -425,7 +426,8 @@ class ConversationViewModel: ObservableObject {
             if inputMode == .handsFree && isActive {
                 Task {
                     try? await Task.sleep(for: .milliseconds(300))
-                    if state == .idle {
+                    // CRITICAL: Check isActive again to prevent race condition on exit
+                    if state == .idle && isActive {
                         try? await audioPipeline.startRecording()
                     }
                 }
@@ -466,7 +468,8 @@ class ConversationViewModel: ObservableObject {
         if inputMode == .handsFree && isActive {
             Task {
                 try? await Task.sleep(for: .milliseconds(200))
-                if state == .idle {
+                // CRITICAL: Check isActive again to prevent race condition on exit
+                if state == .idle && isActive {
                     try? await audioPipeline.startRecording()
                 }
             }
