@@ -111,6 +111,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBar()
         setupFocusPanel()
         setupNotifications()
+        initializeMacControlServices()
+    }
+    
+    private func initializeMacControlServices() {
+        // Initialize workspace monitoring for app lifecycle events
+        Task { @MainActor in
+            WorkspaceMonitor.shared.startMonitoring()
+            SystemNotificationService.shared.startListening()
+            
+            // Register default Jarvis hotkeys
+            GlobalHotkeyService.shared.registerDefaultJarvisHotkeys(
+                onActivate: { [weak self] in
+                    self?.toggleFocusPanel()
+                },
+                onFocusMode: { [weak self] in
+                    self?.openFocusMode()
+                },
+                onQuickCapture: {
+                    NotificationCenter.default.post(name: NSNotification.Name("QuickCapture"), object: nil)
+                },
+                onVoiceCommand: {
+                    NotificationCenter.default.post(name: NSNotification.Name("PushToTalk"), object: nil)
+                }
+            )
+        }
     }
     
     private func setupMenuBar() {
@@ -156,6 +181,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Set appearance
         panel.appearance = NSAppearance(named: .vibrantDark)
+        
+        // Hide the traffic light buttons (close, minimize, zoom)
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
         
         // Add SwiftUI content - Unified Panel with Focus/Conversation modes
         let hostingController = NSHostingController(rootView: UnifiedPanelView())
@@ -351,11 +381,3 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// MARK: - Settings Window View
-struct SettingsWindowView: View {
-    @ObservedObject private var viewModel = SharedChatViewModel.shared.viewModel
-    
-    var body: some View {
-        SettingsView(viewModel: viewModel)
-    }
-}

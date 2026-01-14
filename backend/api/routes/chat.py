@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from api.models import ChatRequest
-from langchain_core.messages import HumanMessage, SystemMessage
-from agents.graph import agent_graph
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from agents.graph import agent_graph, get_agent_config
 from core.logger import setup_logger
 from core.chroma_client import chroma_client
 from core.rate_limiter import rate_limiter
@@ -26,8 +26,8 @@ async def chat_stream(request: ChatRequest, http_request: Request):
     
     async def event_generator():
         try:
-            # Get the last user message
-            user_message = next((msg.content for msg in reversed(request.messages) if msg.role == "user"), "")
+            # Build full conversation history from request
+            conversation_messages = []
             
             # Build context from attached files if any
             file_context = {}
@@ -59,18 +59,23 @@ async def chat_stream(request: ChatRequest, http_request: Request):
                     file_context_text += f"The user uploaded file(s) with IDs: {', '.join(request.file_ids)}\n"
                     file_context_text += "However, the file content could not be retrieved. The file may still be processing.\n\n"
             
-            # Build messages with file context if available
-            messages = []
+            # Add file context as system message if available
             if file_context_text:
                 system_context = SystemMessage(
                     content=f"You have access to the following file context. Use this information to answer questions about these files.\n{file_context_text}"
                 )
-                messages.append(system_context)
+                conversation_messages.append(system_context)
             
-            messages.append(HumanMessage(content=user_message))
+            # Convert all conversation messages to LangChain format
+            # This preserves the full conversation history including tool results
+            for msg in request.messages:
+                if msg.role == "user":
+                    conversation_messages.append(HumanMessage(content=msg.content))
+                elif msg.role == "assistant":
+                    conversation_messages.append(AIMessage(content=msg.content))
             
             initial_state = {
-                "messages": messages,
+                "messages": conversation_messages,
                 "reasoning": [],
                 "tool_calls": [],
                 "file_context": file_context,
@@ -83,7 +88,11 @@ async def chat_stream(request: ChatRequest, http_request: Request):
             content_buffer = ""
             total_tokens = 0
             
-            async for event in agent_graph.astream(initial_state, stream_mode="updates"):
+            # Get agent config for recursion limit
+            agent_config = get_agent_config()
+            run_config = {"recursion_limit": agent_config["recursion_limit"]}
+            
+            async for event in agent_graph.astream(initial_state, stream_mode="updates", config=run_config):
                 for node_name, node_output in event.items():
                     if "messages" in node_output:
                         for message in node_output["messages"]:
@@ -129,7 +138,9 @@ async def chat_stream(request: ChatRequest, http_request: Request):
             
             # Estimate tokens if not available (roughly 4 chars per token)
             if total_tokens == 0:
-                total_tokens = (len(content_buffer) + len(user_message)) // 4
+                # Calculate based on all conversation messages
+                all_content = content_buffer + "".join([msg.content for msg in conversation_messages])
+                total_tokens = len(all_content) // 4
             
             yield f"data: {json.dumps({'type': 'done', 'reasoning_count': len(reasoning_items), 'token_count': total_tokens})}\n\n"
         

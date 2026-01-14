@@ -13,5 +13,25 @@
     <!-- Audio Input for AVAudioEngine -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    
+    <!-- Accessibility Permission -->
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Jarvis needs accessibility access to control UI elements, click buttons, and automate tasks across applications.</string>
+    
+    <!-- Apple Events / Automation Permission -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Jarvis needs to send Apple Events to control applications and automate macOS tasks.</string>
+    
+    <!-- Screen Capture Permission -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Jarvis needs screen capture access to take screenshots and understand visual context.</string>
+    
+    <!-- Input Monitoring for CGEvent -->
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>Jarvis needs input monitoring access to simulate keyboard and mouse input for automation.</string>
+    
+    <!-- Siri and App Intents -->
+    <key>INSiriAuthorizationRequest</key>
+    <string>Jarvis uses Siri integration to respond to voice commands via Shortcuts.</string>
 </dict>
 </plist>

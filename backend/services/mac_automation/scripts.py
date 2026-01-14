@@ -220,15 +220,20 @@ end if
         self._add_script(AutomationScript(
             id="system_set_brightness",
             name="Set Display Brightness",
-            description="Set display brightness (0.0-1.0)",
+            description="Set display brightness (0.0-1.0). Note: Requires brightness CLI tool or uses keyboard simulation",
             category=ScriptCategory.SYSTEM,
             script='''
-do shell script "brightness {brightness_level}"
-return "Brightness set to {brightness_level}"
+tell application "System Events"
+    -- Use keyboard brightness keys as fallback
+    repeat {brightness_steps} times
+        key code 145 -- Brightness down key
+    end repeat
+end tell
+return "Adjusted brightness"
 ''',
             language="applescript",
-            parameters=["brightness_level"],
-            examples=["Set brightness to 0.5", "Dim the screen", "Make screen brighter"]
+            parameters=["brightness_steps"],
+            examples=["Dim the screen by 5 steps", "Make screen brighter"]
         ))
         
         self._add_script(AutomationScript(
@@ -377,7 +382,8 @@ end tell
             script='''
 tell application "Finder"
     activate
-    make new Finder window to folder "{path}"
+    set targetPath to POSIX file "{path}" as alias
+    make new Finder window to targetPath
 end tell
 return "Opened Finder at {path}"
 ''',
@@ -412,11 +418,12 @@ end tell
         self._add_script(AutomationScript(
             id="finder_create_folder",
             name="Create New Folder",
-            description="Create a new folder at specified location",
+            description="Create a new folder at specified location (use POSIX path like /Users/username/Desktop)",
             category=ScriptCategory.FINDER,
             script='''
 tell application "Finder"
-    make new folder at folder "{location}" with properties {name:"{folder_name}"}
+    set targetPath to POSIX file "{location}" as alias
+    make new folder at targetPath with properties {name:"{folder_name}"}
 end tell
 return "Created folder '{folder_name}' at {location}"
 ''',
@@ -1003,6 +1010,784 @@ return "Timer completed after {seconds} seconds"
             language="applescript",
             parameters=["seconds"],
             examples=["Set a 5 minute timer", "Timer for 30 seconds", "Start countdown"]
+        ))
+        
+        # ============== SCREEN CAPTURE & VISION ==============
+        self._add_script(AutomationScript(
+            id="screen_capture_full",
+            name="Capture Full Screen",
+            description="Capture a screenshot of the entire screen and save to Desktop",
+            category=ScriptCategory.UTILITIES,
+            script='''
+do shell script "screencapture -x ~/Desktop/jarvis_screenshot_$(date +%Y%m%d_%H%M%S).png"
+set screenshotPath to do shell script "ls -t ~/Desktop/jarvis_screenshot_*.png | head -1"
+return "Screenshot saved to: " & screenshotPath
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Take a screenshot", "Capture my screen", "Screenshot the display"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="screen_capture_window",
+            name="Capture Front Window",
+            description="Capture a screenshot of the frontmost window",
+            category=ScriptCategory.UTILITIES,
+            script='''
+do shell script "screencapture -x -w ~/Desktop/jarvis_window_$(date +%Y%m%d_%H%M%S).png"
+set screenshotPath to do shell script "ls -t ~/Desktop/jarvis_window_*.png | head -1"
+return "Window screenshot saved to: " & screenshotPath
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Screenshot this window", "Capture front window", "Screenshot active window"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="screen_capture_to_clipboard",
+            name="Capture Screen to Clipboard",
+            description="Capture a screenshot and copy to clipboard for immediate use",
+            category=ScriptCategory.UTILITIES,
+            script='''
+do shell script "screencapture -x -c"
+return "Screenshot copied to clipboard"
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Screenshot to clipboard", "Copy screen to clipboard"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="screen_capture_selection",
+            name="Capture Screen Selection",
+            description="Capture a selected area of the screen (interactive)",
+            category=ScriptCategory.UTILITIES,
+            script='''
+do shell script "screencapture -x -i ~/Desktop/jarvis_selection_$(date +%Y%m%d_%H%M%S).png"
+set screenshotPath to do shell script "ls -t ~/Desktop/jarvis_selection_*.png 2>/dev/null | head -1"
+if screenshotPath is "" then
+    return "Selection cancelled"
+else
+    return "Selection screenshot saved to: " & screenshotPath
+end if
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Screenshot a selection", "Capture part of screen"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="screen_capture_specific_display",
+            name="Capture Specific Display",
+            description="Capture screenshot of a specific display (by number: 1, 2, etc.)",
+            category=ScriptCategory.UTILITIES,
+            script='''
+do shell script "screencapture -x -D {display_number} ~/Desktop/jarvis_display{display_number}_$(date +%Y%m%d_%H%M%S).png"
+set screenshotPath to do shell script "ls -t ~/Desktop/jarvis_display{display_number}_*.png | head -1"
+return "Display {display_number} screenshot saved to: " & screenshotPath
+''',
+            language="applescript",
+            parameters=["display_number"],
+            examples=["Screenshot display 2", "Capture second monitor", "Screenshot external display"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="screen_get_displays",
+            name="Get Connected Displays",
+            description="Get information about all connected displays",
+            category=ScriptCategory.INFORMATION,
+            script='''
+do shell script "system_profiler SPDisplaysDataType | grep -E '(Display Type|Resolution|Main Display|Mirror|Online)' | head -20"
+''',
+            language="applescript",
+            parameters=[],
+            examples=["How many monitors?", "What displays are connected?", "Show display info"]
+        ))
+        
+        # ============== ACCESSIBILITY & UI INSPECTION ==============
+        self._add_script(AutomationScript(
+            id="accessibility_get_frontmost_window_info",
+            name="Get Frontmost Window Details",
+            description="Get detailed information about the frontmost window including title, size, position",
+            category=ScriptCategory.INFORMATION,
+            script='''
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set appName to name of frontApp
+    set windowInfo to ""
+    try
+        set frontWindow to front window of frontApp
+        set winName to name of frontWindow
+        set winPos to position of frontWindow
+        set winSize to size of frontWindow
+        set windowInfo to "App: " & appName & ", Window: " & winName & ", Position: " & (item 1 of winPos) & "," & (item 2 of winPos) & ", Size: " & (item 1 of winSize) & "x" & (item 2 of winSize)
+    on error
+        set windowInfo to "App: " & appName & " (no accessible window)"
+    end try
+    return windowInfo
+end tell
+''',
+            language="applescript",
+            parameters=[],
+            examples=["What window is active?", "Get window info", "Window details"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="accessibility_get_ui_elements",
+            name="Get UI Elements of Front App",
+            description="Get list of UI elements (buttons, text fields, etc.) in the frontmost application",
+            category=ScriptCategory.INFORMATION,
+            script='''
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set appName to name of frontApp
+    set elementInfo to "UI Elements in " & appName & ":\\n"
+    try
+        set frontWindow to front window of frontApp
+        set allButtons to name of every button of frontWindow
+        set allTextFields to every text field of frontWindow
+        set allStaticTexts to value of every static text of frontWindow
+        set elementInfo to elementInfo & "Buttons: " & (allButtons as text) & "\\n"
+        set elementInfo to elementInfo & "Text Fields: " & (count of allTextFields) & "\\n"
+        set elementInfo to elementInfo & "Static Texts: " & (allStaticTexts as text)
+    on error errMsg
+        set elementInfo to elementInfo & "Limited access - " & errMsg
+    end try
+    return elementInfo
+end tell
+''',
+            language="applescript",
+            parameters=[],
+            examples=["What buttons are visible?", "Get UI elements", "List interface elements"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="accessibility_get_focused_element",
+            name="Get Focused UI Element",
+            description="Get information about the currently focused UI element (text field, button, etc.)",
+            category=ScriptCategory.INFORMATION,
+            script='''
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    try
+        set focusedElem to focused UI element of frontApp
+        set elemRole to role of focusedElem
+        set elemDesc to description of focusedElem
+        try
+            set elemValue to value of focusedElem
+        on error
+            set elemValue to "N/A"
+        end try
+        return "Focused: " & elemRole & " - " & elemDesc & ", Value: " & elemValue
+    on error
+        return "No focused element accessible"
+    end try
+end tell
+''',
+            language="applescript",
+            parameters=[],
+            examples=["What's focused?", "Current input field", "Focused element"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="accessibility_get_menu_bar_items",
+            name="Get Menu Bar Items",
+            description="Get list of menu bar items for the frontmost application",
+            category=ScriptCategory.INFORMATION,
+            script='''
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set appName to name of frontApp
+    try
+        set menuItems to name of every menu bar item of menu bar 1 of frontApp
+        return "Menu items for " & appName & ": " & (menuItems as text)
+    on error
+        return "Could not access menu bar for " & appName
+    end try
+end tell
+''',
+            language="applescript",
+            parameters=[],
+            examples=["What menus are available?", "List menu items", "Get menu bar"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="accessibility_click_button",
+            name="Click Button by Name",
+            description="Click a button in the frontmost window by its name",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    tell frontApp
+        try
+            click button "{button_name}" of front window
+            return "Clicked button: {button_name}"
+        on error
+            -- Try finding in groups or other containers
+            try
+                click button "{button_name}" of group 1 of front window
+                return "Clicked button: {button_name}"
+            on error errMsg
+                return "Could not find or click button '{button_name}': " & errMsg
+            end try
+        end try
+    end tell
+end tell
+''',
+            language="applescript",
+            parameters=["button_name"],
+            examples=["Click OK button", "Press Cancel", "Click Submit"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="accessibility_type_text",
+            name="Type Text into Focused Field",
+            description="Type text into the currently focused text field",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    keystroke "{text}"
+end tell
+return "Typed: {text}"
+''',
+            language="applescript",
+            parameters=["text"],
+            examples=["Type hello", "Enter text", "Type this message"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="accessibility_press_key",
+            name="Press Keyboard Key",
+            description="Press a keyboard key or key combination",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    keystroke "{key}" using {modifiers}
+end tell
+return "Pressed: {key} with {modifiers}"
+''',
+            language="applescript",
+            parameters=["key", "modifiers"],
+            examples=["Press Enter", "Press Cmd+C", "Press Tab"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="accessibility_get_all_windows",
+            name="Get All Windows Info",
+            description="Get information about all open windows across all applications",
+            category=ScriptCategory.INFORMATION,
+            script='''
+tell application "System Events"
+    set windowList to ""
+    repeat with proc in (application processes whose background only is false)
+        set appName to name of proc
+        try
+            set appWindows to windows of proc
+            repeat with win in appWindows
+                try
+                    set winName to name of win
+                    set winPos to position of win
+                    set windowList to windowList & appName & ": " & winName & " at " & (item 1 of winPos) & "," & (item 2 of winPos) & "\\n"
+                end try
+            end repeat
+        end try
+    end repeat
+    return windowList
+end tell
+''',
+            language="applescript",
+            parameters=[],
+            examples=["List all windows", "What windows are open?", "Show all open windows"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="accessibility_get_screen_bounds",
+            name="Get Screen Bounds",
+            description="Get the bounds and position of all screens/displays",
+            category=ScriptCategory.INFORMATION,
+            script='''
+tell application "Finder"
+    set screenBounds to bounds of window of desktop
+    return "Main screen bounds: " & (item 1 of screenBounds) & "," & (item 2 of screenBounds) & " to " & (item 3 of screenBounds) & "," & (item 4 of screenBounds)
+end tell
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Screen size", "Display bounds", "Monitor dimensions"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="accessibility_get_selected_text",
+            name="Get Selected Text",
+            description="Get the currently selected text in any application",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    keystroke "c" using command down
+end tell
+delay 0.1
+set selectedText to the clipboard
+return "Selected text: " & selectedText
+''',
+            language="applescript",
+            parameters=[],
+            examples=["What text is selected?", "Get selection", "Copy selected text"]
+        ))
+        
+        # ============== DESKTOP & SPACES ==============
+        self._add_script(AutomationScript(
+            id="desktop_get_current_space",
+            name="Get Current Desktop Space",
+            description="Get information about the current desktop space/virtual desktop",
+            category=ScriptCategory.INFORMATION,
+            script='''
+do shell script "defaults read com.apple.spaces spans-displays"
+set spaceInfo to result
+tell application "System Events"
+    set desktopCount to count of desktops
+end tell
+return "Desktop spaces: " & desktopCount & ", Spans displays: " & spaceInfo
+''',
+            language="applescript",
+            parameters=[],
+            examples=["What desktop am I on?", "How many spaces?", "Virtual desktop info"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="desktop_switch_space",
+            name="Switch Desktop Space",
+            description="Switch to a different desktop space using keyboard shortcut",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    key code 124 using control down -- Right arrow with Control = next space
+end tell
+return "Switched to next desktop space"
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Next desktop", "Switch space", "Go to next virtual desktop"]
+        ))
+        
+        # ============== MOUSE & KEYBOARD SIMULATION ==============
+        self._add_script(AutomationScript(
+            id="mouse_click_at",
+            name="Click at Screen Position",
+            description="Perform a mouse click at specific screen coordinates",
+            category=ScriptCategory.UTILITIES,
+            script='''
+do shell script "cliclick c:{x},{y}"
+return "Clicked at position ({x}, {y})"
+''',
+            language="applescript",
+            parameters=["x", "y"],
+            examples=["Click at 500,300", "Mouse click at position", "Click coordinates"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="mouse_double_click",
+            name="Double Click at Position",
+            description="Perform a double click at specific screen coordinates",
+            category=ScriptCategory.UTILITIES,
+            script='''
+do shell script "cliclick dc:{x},{y}"
+return "Double clicked at position ({x}, {y})"
+''',
+            language="applescript",
+            parameters=["x", "y"],
+            examples=["Double click at 500,300", "Double click position"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="mouse_right_click",
+            name="Right Click at Position",
+            description="Perform a right click at specific screen coordinates",
+            category=ScriptCategory.UTILITIES,
+            script='''
+do shell script "cliclick rc:{x},{y}"
+return "Right clicked at position ({x}, {y})"
+''',
+            language="applescript",
+            parameters=["x", "y"],
+            examples=["Right click at 500,300", "Context menu at position"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="mouse_move_to",
+            name="Move Mouse to Position",
+            description="Move the mouse cursor to specific screen coordinates",
+            category=ScriptCategory.UTILITIES,
+            script='''
+do shell script "cliclick m:{x},{y}"
+return "Moved mouse to position ({x}, {y})"
+''',
+            language="applescript",
+            parameters=["x", "y"],
+            examples=["Move mouse to 500,300", "Position cursor"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="mouse_drag",
+            name="Drag from Point to Point",
+            description="Drag the mouse from one position to another",
+            category=ScriptCategory.UTILITIES,
+            script='''
+do shell script "cliclick dd:{start_x},{start_y} du:{end_x},{end_y}"
+return "Dragged from ({start_x}, {start_y}) to ({end_x}, {end_y})"
+''',
+            language="applescript",
+            parameters=["start_x", "start_y", "end_x", "end_y"],
+            examples=["Drag from 100,100 to 500,500", "Move element by dragging"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="keyboard_type_text",
+            name="Type Text String",
+            description="Type a text string as keyboard input",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    keystroke "{text}"
+end tell
+return "Typed text: {text}"
+''',
+            language="applescript",
+            parameters=["text"],
+            examples=["Type hello world", "Enter text", "Type this string"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="keyboard_shortcut",
+            name="Press Keyboard Shortcut",
+            description="Press a keyboard shortcut combination (e.g., command+c for copy)",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    keystroke "{key}" using {{{modifiers}}}
+end tell
+return "Pressed shortcut: {modifiers} + {key}"
+''',
+            language="applescript",
+            parameters=["key", "modifiers"],
+            examples=["Press Cmd+C", "Copy shortcut", "Press Cmd+V to paste"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="keyboard_press_return",
+            name="Press Return/Enter Key",
+            description="Press the Return/Enter key",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    key code 36
+end tell
+return "Pressed Return key"
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Press Enter", "Submit form", "Press Return"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="keyboard_press_escape",
+            name="Press Escape Key",
+            description="Press the Escape key",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    key code 53
+end tell
+return "Pressed Escape key"
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Press Escape", "Cancel dialog", "Close popup"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="keyboard_press_tab",
+            name="Press Tab Key",
+            description="Press the Tab key to move focus",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    key code 48
+end tell
+return "Pressed Tab key"
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Press Tab", "Next field", "Move focus"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="keyboard_arrow_key",
+            name="Press Arrow Key",
+            description="Press an arrow key (direction: up, down, left, right)",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    key code {key_code}
+end tell
+return "Pressed {direction} arrow key"
+''',
+            language="applescript",
+            parameters=["direction", "key_code"],
+            examples=["Press up arrow", "Arrow down", "Navigate left"]
+        ))
+        
+        # ============== SHORTCUTS INTEGRATION ==============
+        self._add_script(AutomationScript(
+            id="shortcuts_list",
+            name="List Available Shortcuts",
+            description="Get a list of all available Shortcuts on this Mac",
+            category=ScriptCategory.INFORMATION,
+            script='''
+tell application "Shortcuts Events"
+    set shortcutNames to name of every shortcut
+    set output to ""
+    repeat with sName in shortcutNames
+        set output to output & sName & ", "
+    end repeat
+    return output
+end tell
+''',
+            language="applescript",
+            parameters=[],
+            examples=["List my shortcuts", "What shortcuts are available?", "Show shortcuts"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="shortcuts_run",
+            name="Run Shortcut by Name",
+            description="Run a Shortcut workflow by its name",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "Shortcuts Events"
+    run shortcut "{shortcut_name}"
+end tell
+return "Ran shortcut: {shortcut_name}"
+''',
+            language="applescript",
+            parameters=["shortcut_name"],
+            examples=["Run Morning Routine shortcut", "Execute my workflow", "Run shortcut"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="shortcuts_run_with_input",
+            name="Run Shortcut with Input",
+            description="Run a Shortcut workflow with text input",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "Shortcuts Events"
+    run shortcut "{shortcut_name}" with input "{input_text}"
+end tell
+return "Ran shortcut '{shortcut_name}' with input"
+''',
+            language="applescript",
+            parameters=["shortcut_name", "input_text"],
+            examples=["Run shortcut with data", "Execute workflow with input"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="shortcuts_open_app",
+            name="Open Shortcuts App",
+            description="Open the Shortcuts application",
+            category=ScriptCategory.APPS,
+            script='''
+tell application "Shortcuts"
+    activate
+end tell
+return "Opened Shortcuts app"
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Open Shortcuts", "Launch Shortcuts app"]
+        ))
+        
+        # ============== UI ELEMENT CLICKING ==============
+        self._add_script(AutomationScript(
+            id="ui_click_menu_item",
+            name="Click Menu Item",
+            description="Click a menu item in the frontmost application's menu bar",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    tell process "{app_name}"
+        set frontmost to true
+        click menu item "{menu_item}" of menu "{menu_name}" of menu bar 1
+    end tell
+end tell
+return "Clicked menu: {menu_name} > {menu_item}"
+''',
+            language="applescript",
+            parameters=["app_name", "menu_name", "menu_item"],
+            examples=["Click File > Save", "Open Edit menu Copy", "Click menu item"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="ui_click_toolbar_button",
+            name="Click Toolbar Button",
+            description="Click a button in the toolbar of the frontmost window",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    tell process "{app_name}"
+        click button "{button_name}" of toolbar 1 of front window
+    end tell
+end tell
+return "Clicked toolbar button: {button_name}"
+''',
+            language="applescript",
+            parameters=["app_name", "button_name"],
+            examples=["Click toolbar button", "Press toolbar item"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="ui_set_text_field",
+            name="Set Text Field Value",
+            description="Set the value of a text field in the frontmost window",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    tell process "{app_name}"
+        set value of text field {field_index} of front window to "{value}"
+    end tell
+end tell
+return "Set text field {field_index} to: {value}"
+''',
+            language="applescript",
+            parameters=["app_name", "field_index", "value"],
+            examples=["Set search field", "Enter text in field", "Fill form field"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="ui_click_checkbox",
+            name="Click Checkbox",
+            description="Toggle a checkbox in the frontmost window",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    tell process "{app_name}"
+        click checkbox "{checkbox_name}" of front window
+    end tell
+end tell
+return "Toggled checkbox: {checkbox_name}"
+''',
+            language="applescript",
+            parameters=["app_name", "checkbox_name"],
+            examples=["Toggle checkbox", "Check option", "Uncheck setting"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="ui_select_popup",
+            name="Select Popup Menu Item",
+            description="Select an item from a popup button/menu",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    tell process "{app_name}"
+        click pop up button 1 of front window
+        click menu item "{item_name}" of menu 1 of pop up button 1 of front window
+    end tell
+end tell
+return "Selected popup item: {item_name}"
+''',
+            language="applescript",
+            parameters=["app_name", "item_name"],
+            examples=["Select from dropdown", "Choose popup option"]
+        ))
+        
+        # ============== WINDOW MANAGEMENT ==============
+        self._add_script(AutomationScript(
+            id="window_move",
+            name="Move Window to Position",
+            description="Move the frontmost window to a specific position",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set position of front window of frontApp to {{{x}, {y}}}
+end tell
+return "Moved window to position ({x}, {y})"
+''',
+            language="applescript",
+            parameters=["x", "y"],
+            examples=["Move window to 0,0", "Position window", "Move window top left"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="window_resize",
+            name="Resize Window",
+            description="Resize the frontmost window to specific dimensions",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set size of front window of frontApp to {{{width}, {height}}}
+end tell
+return "Resized window to {width}x{height}"
+''',
+            language="applescript",
+            parameters=["width", "height"],
+            examples=["Resize window to 1200x800", "Make window bigger", "Set window size"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="window_maximize",
+            name="Maximize Window",
+            description="Maximize the frontmost window to fill the screen",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set frontmost of frontApp to true
+    keystroke "f" using {control down, command down}
+end tell
+return "Maximized window"
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Maximize window", "Full screen", "Make window fullscreen"]
+        ))
+        
+        self._add_script(AutomationScript(
+            id="window_arrange_side_by_side",
+            name="Arrange Windows Side by Side",
+            description="Arrange the two frontmost windows side by side",
+            category=ScriptCategory.UTILITIES,
+            script='''
+tell application "System Events"
+    set screenWidth to (do shell script "system_profiler SPDisplaysDataType | grep Resolution | head -1 | awk '{print $2}'") as number
+    set screenHeight to (do shell script "system_profiler SPDisplaysDataType | grep Resolution | head -1 | awk '{print $4}'") as number
+    set halfWidth to screenWidth / 2
+    
+    set allProcs to (application processes whose background only is false)
+    set visibleWindows to {}
+    repeat with proc in allProcs
+        try
+            set wins to windows of proc
+            repeat with w in wins
+                set end of visibleWindows to {proc, w}
+            end repeat
+        end try
+    end repeat
+    
+    if (count of visibleWindows) >= 2 then
+        set {proc1, win1} to item 1 of visibleWindows
+        set {proc2, win2} to item 2 of visibleWindows
+        set position of win1 to {0, 25}
+        set size of win1 to {halfWidth, screenHeight - 25}
+        set position of win2 to {halfWidth, 25}
+        set size of win2 to {halfWidth, screenHeight - 25}
+    end if
+end tell
+return "Arranged windows side by side"
+''',
+            language="applescript",
+            parameters=[],
+            examples=["Split screen", "Side by side windows", "Tile windows"]
         ))
     
     def _add_script(self, script: AutomationScript):

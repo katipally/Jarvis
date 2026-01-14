@@ -41,6 +41,15 @@
 		AA0063 /* SiriBlobView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0064 /* SiriBlobView.swift */; };
 		AA0065 /* ConversationModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0066 /* ConversationModeView.swift */; };
 		AA0067 /* UnifiedPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0068 /* UnifiedPanelView.swift */; };
+		AA0069 /* JarvisAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0070 /* JarvisAppIntents.swift */; };
+		AA0071 /* JarvisIntentHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0072 /* JarvisIntentHandler.swift */; };
+		AA0073 /* AccessibilityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0074 /* AccessibilityService.swift */; };
+		AA0075 /* InputSimulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0076 /* InputSimulator.swift */; };
+		AA0077 /* ShortcutsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0078 /* ShortcutsService.swift */; };
+		AA0079 /* WorkspaceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0080 /* WorkspaceMonitor.swift */; };
+		AA0081 /* SystemNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0082 /* SystemNotificationService.swift */; };
+		AA0083 /* GlobalHotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0084 /* GlobalHotkeyService.swift */; };
+		AA0085 /* SettingsWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0086 /* SettingsWindowView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -77,6 +86,15 @@
 		AA0064 /* SiriBlobView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriBlobView.swift; sourceTree = "<group>"; };
 		AA0066 /* ConversationModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationModeView.swift; sourceTree = "<group>"; };
 		AA0068 /* UnifiedPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedPanelView.swift; sourceTree = "<group>"; };
+		AA0070 /* JarvisAppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAppIntents.swift; sourceTree = "<group>"; };
+		AA0072 /* JarvisIntentHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisIntentHandler.swift; sourceTree = "<group>"; };
+		AA0074 /* AccessibilityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityService.swift; sourceTree = "<group>"; };
+		AA0076 /* InputSimulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSimulator.swift; sourceTree = "<group>"; };
+		AA0078 /* ShortcutsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsService.swift; sourceTree = "<group>"; };
+		AA0080 /* WorkspaceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceMonitor.swift; sourceTree = "<group>"; };
+		AA0082 /* SystemNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemNotificationService.swift; sourceTree = "<group>"; };
+		AA0084 /* GlobalHotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyService.swift; sourceTree = "<group>"; };
+		AA0086 /* SettingsWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowView.swift; sourceTree = "<group>"; };
 		AAPP01 /* JarvisAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JarvisAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -102,9 +120,19 @@
 				AASERV /* Services */,
 				AAMODL /* Models */,
 				AAUTIL /* Utils */,
+				AAINTENT /* AppIntents */,
 				AA0006 /* Assets.xcassets */,
 			);
 			path = JarvisAI;
+			sourceTree = "<group>";
+		};
+		AAINTENT /* AppIntents */ = {
+			isa = PBXGroup;
+			children = (
+				AA0070 /* JarvisAppIntents.swift */,
+				AA0072 /* JarvisIntentHandler.swift */,
+			);
+			path = AppIntents;
 			sourceTree = "<group>";
 		};
 		AAMODL /* Models */ = {
@@ -141,8 +169,22 @@
 				AA0056 /* AudioPipeline.swift */,
 				AA0058 /* SpeechRecognitionService.swift */,
 				AA0060 /* SpeechSynthesisService.swift */,
+				AAMACCTRL /* MacControl */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		AAMACCTRL /* MacControl */ = {
+			isa = PBXGroup;
+			children = (
+				AA0074 /* AccessibilityService.swift */,
+				AA0076 /* InputSimulator.swift */,
+				AA0078 /* ShortcutsService.swift */,
+				AA0080 /* WorkspaceMonitor.swift */,
+				AA0082 /* SystemNotificationService.swift */,
+				AA0084 /* GlobalHotkeyService.swift */,
+			);
+			path = MacControl;
 			sourceTree = "<group>";
 		};
 		AAUTIL /* Utils */ = {
@@ -175,6 +217,7 @@
 				AA0064 /* SiriBlobView.swift */,
 				AA0066 /* ConversationModeView.swift */,
 				AA0068 /* UnifiedPanelView.swift */,
+				AA0086 /* SettingsWindowView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -290,6 +333,15 @@
 				AA0063 /* SiriBlobView.swift in Sources */,
 				AA0065 /* ConversationModeView.swift in Sources */,
 				AA0067 /* UnifiedPanelView.swift in Sources */,
+				AA0069 /* JarvisAppIntents.swift in Sources */,
+				AA0071 /* JarvisIntentHandler.swift in Sources */,
+				AA0073 /* AccessibilityService.swift in Sources */,
+				AA0075 /* InputSimulator.swift in Sources */,
+				AA0077 /* ShortcutsService.swift in Sources */,
+				AA0079 /* WorkspaceMonitor.swift in Sources */,
+				AA0081 /* SystemNotificationService.swift in Sources */,
+				AA0083 /* GlobalHotkeyService.swift in Sources */,
+				AA0085 /* SettingsWindowView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

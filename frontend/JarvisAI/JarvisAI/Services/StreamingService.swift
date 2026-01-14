@@ -10,7 +10,7 @@ class StreamingService: ObservableObject {
     
     private var streamTask: Task<Void, Never>?
     
-    func sendMessage(_ message: String, fileIds: [String] = []) async {
+    func sendMessage(_ message: String, fileIds: [String] = [], conversationHistory: [[String: String]] = []) async {
         isStreaming = true
         currentMessage = ""
         currentReasoning = []
@@ -18,14 +18,20 @@ class StreamingService: ObservableObject {
         tokenCount = 0
         
         streamTask = Task {
-            await performStreaming(message: message, fileIds: fileIds)
+            await performStreaming(message: message, fileIds: fileIds, conversationHistory: conversationHistory)
         }
         
         await streamTask?.value
         isStreaming = false
     }
     
-    private func performStreaming(message: String, fileIds: [String]) async {
+    func cancelStreaming() {
+        streamTask?.cancel()
+        streamTask = nil
+        isStreaming = false
+    }
+    
+    private func performStreaming(message: String, fileIds: [String], conversationHistory: [[String: String]] = []) async {
         guard let url = URL(string: "\(Config.apiBaseURL)/chat/stream") else {
             error = "Invalid URL"
             return
@@ -36,9 +42,12 @@ class StreamingService: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 120
         
-        let chatMessages = [ChatMessage(role: "user", content: message)]
+        // Build full message history including conversation context
+        var allMessages = conversationHistory
+        allMessages.append(["role": "user", "content": message])
+        
         let requestBody: [String: Any] = [
-            "messages": chatMessages.map { ["role": $0.role, "content": $0.content] },
+            "messages": allMessages,
             "file_ids": fileIds,
             "include_reasoning": true
         ]
@@ -127,11 +136,5 @@ class StreamingService: ObservableObject {
         default:
             break
         }
-    }
-    
-    func cancelStreaming() {
-        streamTask?.cancel()
-        streamTask = nil
-        isStreaming = false
     }
 }

@@ -1,101 +1,139 @@
 # 🤖 Jarvis AI Assistant
 
-**Multimodal AI Assistant with Full macOS Control** - Your intelligent companion for Mac automation and productivity
+**The Ultimate macOS AI Assistant** — Combining the best of ChatGPT, Siri, Claude, Cursor & Cluely
 
-✅ Voice Conversation | ✅ Vision Analysis | ✅ Mac Control | ✅ Multimodal Files | ✅ Local LLM Support | ✅ Native macOS UI
+✅ Voice Conversation | ✅ Screen Understanding | ✅ Mac Control | ✅ Accessibility APIs | ✅ Local LLM Support | ✅ Native macOS UI
 
 ---
 
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
 ![macOS](https://img.shields.io/badge/macOS-13.0+-black.svg)
+![Scripts](https://img.shields.io/badge/AppleScripts-75+-purple.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 ## 🚀 Overview
 
-Jarvis is a cutting-edge AI assistant that combines voice conversation, computer vision, and Mac automation capabilities. Built with Swift 6/SwiftUI for the frontend and FastAPI/LangGraph for the backend, Jarvis offers a truly multimodal experience with support for local LLMs via Ollama.
+Jarvis is a cutting-edge AI assistant that combines voice conversation, computer vision, screen understanding, and deep Mac automation capabilities. Built with Swift 6/SwiftUI for the frontend and FastAPI/LangGraph for the backend, Jarvis offers a truly multimodal experience with support for local LLMs via Ollama.
+
+**What makes Jarvis unique:**
+- 🖥️ **Deep macOS Integration** — 75+ AppleScripts + Accessibility APIs
+- 👁️ **Screen Understanding** — Capture & analyze any screen, window, or selection
+- 🎯 **Always-on-Top Focus Mode** — Like Cluely, but with full AI capabilities
+- 🔒 **Privacy-First** — Local LLM support, no cloud dependency required
 
 ## ✨ Key Features
 
-### 🎙️ **Voice Conversation Mode**
-- **Natural voice interaction** with interruption handling
-- **Wake word detection** - "Hey Jarvis" always listening
-- **Streaming TTS** with premium voices
-- **Hands-free and push-to-talk modes**
-- **Context-aware conversations** with memory
+### 🎙️ Voice Conversation Mode
+- Natural voice interaction with interruption handling
+- Wake word detection — "Hey Jarvis" always listening
+- Streaming TTS with premium voices
+- Hands-free and push-to-talk modes
+- Context-aware conversations with memory
 
-### 👁️ **Vision & Multimodal**
-- **Screen capture analysis** - "What's on my screen?"
-- **Image understanding** with GPT-5-nano vision
-- **Document processing** (PDF, images, text)
-- **OCR text extraction** from images
-- **Real-time visual context** during conversations
+### 👁️ Vision & Screen Understanding
+- **Full screen capture** — Analyze entire display
+- **Window capture** — Screenshot active window
+- **Selection capture** — Capture specific regions
+- **Multi-display support** — Handle multiple monitors
+- **Accessibility inspection** — Read UI elements, buttons, text fields
+- **Document processing** — PDF, images, text with OCR
 
-### 🖥️ **Mac Automation**
-- **56 pre-built automation scripts**
-- **App control** (open, quit, switch)
-- **System settings** (volume, brightness, dark mode)
-- **Browser automation** (Safari control)
-- **File management** (create, open, navigate)
-- **Productivity tools** (calendar, reminders, notes)
+### 🖥️ Mac Automation (75+ Scripts)
 
-### 🤖 **AI Model Support**
-- **GPT-5-nano** (OpenAI) - Primary model
-- **Local LLMs** via Ollama integration
-- **Vision models** (LLaVA, Llama3.2-Vision)
-- **Embedding models** for RAG
-- **Model switching** without app restart
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                 Mac Automation Categories                        │
+├──────────────┬──────────────┬──────────────┬───────────────────┤
+│   SYSTEM     │    APPS      │   BROWSER    │   PRODUCTIVITY    │
+│ • Battery    │ • Open/Quit  │ • Safari     │ • Calendar        │
+│ • Volume     │ • List Apps  │ • Chrome     │ • Reminders       │
+│ • Dark Mode  │ • Frontmost  │ • URLs/Tabs  │ • Notes           │
+│ • WiFi Info  │ • Hide/Show  │ • Navigation │ • Mail            │
+│ • Brightness │ • Switch     │              │ • Messages        │
+├──────────────┼──────────────┼──────────────┼───────────────────┤
+│   FINDER     │    MEDIA     │  UTILITIES   │   ACCESSIBILITY   │
+│ • Navigate   │ • Play/Pause │ • Clipboard  │ • UI Elements     │
+│ • Create     │ • Next/Prev  │ • Terminal   │ • Window Info     │
+│ • Open Files │ • Track Info │ • Spotlight  │ • Click Buttons   │
+│ • Selection  │ • Playlists  │ • Spaces     │ • Type Text       │
+│              │              │              │ • Menu Bars       │
+├──────────────┴──────────────┴──────────────┴───────────────────┤
+│                    SCREEN CAPTURE & VISION                       │
+│ • Full Screen  • Window  • Selection  • Multi-Display  • OCR    │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### 🎯 **Interface Modes**
-- **Focus Mode** - Always-on-top floating panel
-- **Chat Mode** - Full-window conversational UI
-- **Conversation Mode** - Voice-first interface
-- **Unified sidebar** with conversation history
+### 🎯 Interface Modes
 
-### 🔒 **Safety & Privacy**
-- **On-device processing** when possible
-- **Blocked destructive operations**
-- **No password/keychain access**
-- **Local data storage** option
-- **Transparent data usage**
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| **Focus Mode** | Always-on-top floating panel | Quick access while working |
+| **Chat Mode** | Full-window conversational UI | Deep conversations |
+| **Conversation Mode** | Voice-first interface | Hands-free interaction |
+
+### 🔒 Safety & Privacy
+- On-device processing with Ollama
+- **Blocked destructive operations** — Cannot delete files
+- No password/keychain access
+- Local data storage option
+- Transparent data usage
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│              Swift 6 / SwiftUI Frontend                 │
-│  ┌──────────┬──────────┬──────────┬──────────────────┐   │
-│  │Chat Mode │Focus Mode│Voice Conv │  Vision Panel   │   │
-│  └──────────┴──────────┴──────────┴──────────────────┘   │
-│  ┌────────────────────────────────────────────────────┐   │
-│  │  Vision Service | Ollama Service | Audio Pipeline │   │
-│  └────────────────────────────────────────────────────┘   │
-└─────────────────────────┬───────────────────────────────┘
-                          │ HTTP/WebSocket
-┌─────────────────────────▼───────────────────────────────┐
-│                FastAPI Backend Server                    │
-│  ┌──────────┬──────────┬──────────┬──────────────────┐   │
-│  │Chat API  │Vision API│Ollama API│  WebSocket WS   │   │
-│  └──────────┴──────────┴──────────┴──────────────────┘   │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│              LangGraph Orchestrator                      │
-│  ┌──────────┬──────────┬──────────┬──────────────────┐   │
-│  │OpenAI API│Ollama LLM│Chroma DB │Mac Automation   │   │
-│  │GPT-5-nano│Local     │RAG Memory│AppleScript      │   │
-│  └──────────┴──────────┴──────────┴──────────────────┘   │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     Jarvis AI Architecture                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              Swift 6 / SwiftUI Frontend                  │   │
+│  │  ┌──────────┬──────────┬──────────┬────────────────┐    │   │
+│  │  │ Chat     │ Focus    │ Voice    │ Settings      │    │   │
+│  │  │ Mode     │ Panel    │ Conv.    │ Panel         │    │   │
+│  │  └──────────┴──────────┴──────────┴────────────────┘    │   │
+│  │  ┌────────────────────────────────────────────────────┐  │   │
+│  │  │ Services: Audio | Speech | Streaming | API        │  │   │
+│  │  └────────────────────────────────────────────────────┘  │   │
+│  └─────────────────────────┬───────────────────────────────┘   │
+│                            │ HTTP/SSE/WebSocket                 │
+│  ┌─────────────────────────▼───────────────────────────────┐   │
+│  │                  FastAPI Backend                         │   │
+│  │  ┌──────────┬──────────┬──────────┬────────────────┐    │   │
+│  │  │ Chat API │Voice API │Files API │  WebSocket    │    │   │
+│  │  └──────────┴──────────┴──────────┴────────────────┘    │   │
+│  └─────────────────────────┬───────────────────────────────┘   │
+│                            │                                    │
+│  ┌─────────────────────────▼───────────────────────────────┐   │
+│  │               LangGraph Agent Orchestrator               │   │
+│  │  ┌──────────────────────────────────────────────────┐   │   │
+│  │  │              Tool Router / Planner                │   │   │
+│  │  └──────────────────────────────────────────────────┘   │   │
+│  │  ┌────────┬────────┬────────┬────────┬────────────┐    │   │
+│  │  │ OpenAI │ Ollama │ChromaDB│  Web   │    Mac     │    │   │
+│  │  │  API   │ Local  │  RAG   │ Search │ Automation │    │   │
+│  │  └────────┴────────┴────────┴────────┴────────────┘    │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              Mac Automation Layer (75+ Scripts)          │   │
+│  │  ┌──────────┬──────────┬──────────┬────────────────┐    │   │
+│  │  │ System   │   Apps   │  Screen  │ Accessibility │    │   │
+│  │  │ Control  │  Control │  Capture │   UI Control  │    │   │
+│  │  └──────────┴──────────┴──────────┴────────────────┘    │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- **macOS** 13.0+ (for ScreenCaptureKit and modern features)
+- **macOS** 13.0+ (Ventura or later)
 - **Python** 3.11+
 - **Xcode** 15.0+
-- **OpenAI API Key** (for GPT-5-nano)
+- **OpenAI API Key** (for GPT models)
 - **Ollama** (optional, for local LLMs)
 
 ### 1. Backend Setup
@@ -105,26 +143,30 @@ cd backend
 
 # Create virtual environment
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Copy environment file
+# Configure environment
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env with your OPENAI_API_KEY
 
-# Start the server
+# Start server
 python main.py
 ```
+
+Backend runs on `http://localhost:8000`
 
 ### 2. Frontend Setup
 
 ```bash
-# Open in Xcode
-open frontend/JarvisAI/JarvisAI.xcodeproj
+cd frontend/JarvisAI
 
-# Build and run from Xcode (⌘+R)
+# Open in Xcode
+open JarvisAI.xcodeproj
+
+# Build and Run (⌘R)
 ```
 
 ### 3. Ollama Setup (Optional)
@@ -133,248 +175,140 @@ open frontend/JarvisAI/JarvisAI.xcodeproj
 # Install Ollama
 curl -fsSL https://ollama.ai/install.sh | sh
 
-# Pull recommended models
+# Pull models
 ollama pull llama3.2
 ollama pull llava
-ollama pull all-minilm
 
 # Start Ollama
 ollama serve
 ```
 
-## 📋 Configuration
+## 📁 Project Structure
 
-### Backend (.env)
-
-```env
-# OpenAI Configuration
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-5-nano
-
-# Ollama Configuration
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
-
-# Vision Settings
-VISION_MODEL=gpt-5-nano
-MAX_IMAGE_SIZE=2048
-
-# Audio Settings
-SAMPLE_RATE=16000
-CHANNELS=1
-
-# Storage
-UPLOAD_DIR=./uploads
-CHROMA_DB_PATH=./data/chroma
 ```
-
-### Frontend (Info.plist)
-
-```xml
-<key>NSMicrophoneUsageDescription</key>
-<string>Jarvis needs microphone access for voice commands</string>
-<key>NSScreenCaptureDescription</key>
-<string>Jarvis needs screen access for vision features</string>
+Jarvis/
+├── backend/                    # FastAPI Python Backend
+│   ├── main.py                # Application entry
+│   ├── api/
+│   │   └── routes/            # REST endpoints
+│   │       ├── chat.py        # Chat streaming
+│   │       ├── files.py       # File uploads
+│   │       └── conversation.py # Voice handling
+│   ├── agents/
+│   │   ├── graph.py           # LangGraph workflow
+│   │   ├── tools.py           # AI tool definitions
+│   │   └── state.py           # Agent state
+│   ├── services/
+│   │   ├── mac_automation/    # AppleScript engine
+│   │   │   ├── executor.py    # Safe script execution
+│   │   │   └── scripts.py     # 75+ pre-built scripts
+│   │   ├── file_processor/    # Document processing
+│   │   └── search_service.py  # Web search
+│   └── core/
+│       ├── config.py          # Settings
+│       ├── openai_client.py   # OpenAI integration
+│       └── chroma_client.py   # Vector DB
+│
+├── frontend/                   # Swift/SwiftUI Frontend
+│   └── JarvisAI/
+│       ├── JarvisAIApp.swift  # App entry + Focus Panel
+│       ├── Views/
+│       │   ├── ChatView.swift
+│       │   ├── FocusPanelView.swift
+│       │   ├── UnifiedPanelView.swift
+│       │   └── ConversationModeView.swift
+│       ├── ViewModels/
+│       │   ├── ChatViewModel.swift
+│       │   └── ConversationViewModel.swift
+│       └── Services/
+│           ├── APIService.swift
+│           ├── StreamingService.swift
+│           ├── AudioPipeline.swift
+│           ├── SpeechRecognitionService.swift
+│           └── SpeechSynthesisService.swift
+│
+├── JARVIS_FEATURES.md         # Full feature roadmap
+└── README.md                  # This file
 ```
 
 ## 🎯 Usage Examples
 
 ### Voice Commands
-
 ```
-"Hey Jarvis, what's the weather like?"
-"Hey Jarvis, open Safari and go to apple.com"
+"Hey Jarvis, what's my battery level?"
+"Hey Jarvis, open Safari and go to github.com"
 "Hey Jarvis, set volume to 50%"
-"Hey Jarvis, what's on my screen right now?"
-"Hey Jarvis, create a new folder named 'Project' on desktop"
+"Hey Jarvis, what apps are running?"
+"Hey Jarvis, toggle dark mode"
 ```
 
-### Vision Features
-
+### Screen Understanding
 ```
-# Analyze uploaded image
-"Explain what's in this image"
-
-# Screen capture
-"Take a screenshot and explain what you see"
-
-# Document analysis
-"Summarize this PDF document"
-"Extract text from this image"
+"Take a screenshot and tell me what you see"
+"What's the title of my current window?"
+"What buttons are visible on screen?"
+"Read the text in the focused field"
 ```
 
 ### Mac Automation
-
 ```
-"Open Spotify and play my liked songs"
-"Create a new note with meeting summary"
-"Open Terminal and navigate to project folder"
-"Set up a split view with Notes and Safari"
-"Take a screenshot and save to desktop"
-```
-
-## 🔧 Advanced Features
-
-### Custom Automation Scripts
-
-Create custom AppleScript actions in `backend/services/mac_automation/scripts/`:
-
-```applescript
--- Custom script example
-on run argv
-    set action to item 1 of argv
-    if action is "custom_action" then
-        -- Your custom logic here
-        return "Action completed successfully"
-    end if
-end run
+"Create a folder called 'Projects' on my desktop"
+"Play the next song"
+"What's on my calendar today?"
+"Send a notification saying 'Meeting in 5 minutes'"
+"Open Terminal and run ls"
 ```
 
-### Model Configuration
+## ⚙️ Configuration
 
-Switch between AI models dynamically:
-
-```swift
-// Use OpenAI
-await ollamaService.setModel("gpt-5-nano")
-
-// Use local model
-await ollamaService.setModel("llama3.2")
-
-// Use vision model
-await ollamaService.setModel("llava")
+### Backend (.env)
+```env
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o
+OLLAMA_BASE_URL=http://localhost:11434
+CHROMA_DB_PATH=./chroma_db
+MAX_FILE_SIZE=10485760
 ```
 
-### Memory Management
+## 🔧 Available Tools
 
-Configure RAG memory settings:
+The AI has access to these tool categories:
 
-```python
-# In backend/core/config.py
-MEMORY_CONFIG = {
-    "max_conversations": 1000,
-    "context_window": 10000,
-    "embedding_model": "all-minilm",
-    "similarity_threshold": 0.7
-}
-```
+| Tool | Description |
+|------|-------------|
+| `run_mac_script` | Execute pre-built AppleScripts |
+| `execute_applescript` | Run custom AppleScript code |
+| `execute_shell_command` | Safe shell commands |
+| `search_knowledge_base` | Search uploaded documents |
+| `web_search` | Internet search via DuckDuckGo |
+| `process_uploaded_file` | Analyze files |
 
-## 🛠️ Development
+## 🛡️ Safety Guardrails
 
-### Project Structure
-
-```
-Jarvis/
-├── backend/                 # FastAPI server
-│   ├── api/                # API routes
-│   │   ├── routes/         # Endpoint definitions
-│   │   └── websocket/      # WebSocket handlers
-│   ├── core/               # Core utilities
-│   │   ├── config.py       # Configuration
-│   │   └── logger.py       # Logging setup
-│   ├── services/           # Business logic
-│   │   ├── mac_automation/ # AppleScript execution
-│   │   ├── ollama.py       # Local LLM client
-│   │   └── vision.py       # Vision processing
-│   └── agents/             # LangGraph agents
-│       ├── graph.py        # Agent workflow
-│       └── tools.py        # Available tools
-├── frontend/               # Swift/SwiftUI app
-│   └── JarvisAI/
-│       ├── Services/       # Network and utilities
-│       │   ├── VisionService.swift
-│       │   ├── OllamaService.swift
-│       │   └── ScreenCaptureService.swift
-│       ├── ViewModels/     # MVVM view models
-│       ├── Views/          # SwiftUI views
-│       └── Models/         # Data models
-└── docs/                   # Documentation
-```
-
-### Adding New Features
-
-1. **Backend**: Create new route in `api/routes/`
-2. **Frontend**: Add service in `Services/`
-3. **UI**: Create view in `Views/`
-4. **Testing**: Add unit tests in `Tests/`
-
-### Debug Mode
-
-Enable debug logging:
-
-```bash
-# Backend
-export LOG_LEVEL=DEBUG
-python main.py
-
-# Frontend
-# In Xcode: Product → Scheme → Edit Scheme → Run → Arguments
-# Add: -XCTDebugEnabled
-```
+Jarvis blocks all destructive operations:
+- ❌ Delete/remove/trash files
+- ❌ Empty trash
+- ❌ Format/erase disks
+- ❌ Shutdown/restart system
+- ❌ Access keychain/passwords
+- ❌ Modify security settings
 
 ## 🐛 Troubleshooting
 
-### Common Issues
-
-1. **Microphone not working**
-   - Check System Preferences → Privacy → Microphone
-   - Ensure Jarvis is listed and enabled
-
-2. **Screen capture fails**
-   - Grant screen recording permission in System Preferences
-   - Restart app after permission change
-
-3. **Ollama connection error**
-   - Ensure Ollama is running: `ollama serve`
-   - Check if port 11434 is available
-
-4. **Voice recognition poor**
-   - Use external microphone for better quality
-   - Calibrate in quiet environment
-
-### Error Codes
-
-| Code | Description | Solution |
-|------|-------------|----------|
-| E001 | Microphone permission denied | Grant microphone access |
-| E002 | Screen recording denied | Grant screen recording permission |
-| E003 | Ollama not connected | Start Ollama service |
-| E004 | API key invalid | Check .env configuration |
-| E005 | Model not found | Download required model |
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Workflow
-
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open Pull Request
+| Issue | Solution |
+|-------|----------|
+| Microphone not working | System Preferences → Privacy → Microphone |
+| Screen capture fails | Grant screen recording permission |
+| Ollama not connecting | Run `ollama serve` |
+| Backend won't start | Check port 8000 is free |
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **OpenAI** for GPT-5-nano API
-- **Ollama** for local LLM support
-- **Apple** for ScreenCaptureKit and AVFoundation
-- **LangChain** for agent framework
-- **FastAPI** for backend framework
-
-## 📞 Support
-
-- 📧 Email: support@jarvis-ai.com
-- 💬 Discord: [Join our community](https://discord.gg/jarvis)
-- 📖 Docs: [jarvis-ai.com/docs](https://jarvis-ai.com/docs)
+MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
 <div align="center">
-  <p>Made with ❤️ by the Jarvis Team</p>
-  <p>⭐ If you like this project, give us a star!</p>
+  <p><strong>Jarvis</strong> — Your AI-powered Mac companion</p>
+  <p>Built with Swift, Python, LangGraph & ❤️</p>
 </div>

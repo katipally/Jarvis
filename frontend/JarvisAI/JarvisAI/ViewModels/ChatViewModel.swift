@@ -259,8 +259,13 @@ class ChatViewModel: ObservableObject {
             }
         }
         
-        // Send to API
-        await streamingService.sendMessage(trimmedText, fileIds: fileIds)
+        // Build conversation history for context
+        let conversationHistory = messages.filter { $0.role != .system }.map { msg in
+            ["role": msg.role.rawValue, "content": msg.content]
+        }
+        
+        // Send to API with full conversation history
+        await streamingService.sendMessage(trimmedText, fileIds: fileIds, conversationHistory: conversationHistory)
     }
     
     // MARK: - Regenerate Message
@@ -290,7 +295,12 @@ class ChatViewModel: ObservableObject {
         currentAssistantMessageId = newAssistantMessage.id
         messages.append(newAssistantMessage)
         
-        await streamingService.sendMessage(userMessage.content, fileIds: userMessage.attachedFileIds)
+        // Build conversation history up to this point
+        let conversationHistory = messages.filter { $0.role != .system }.map { msg in
+            ["role": msg.role.rawValue, "content": msg.content]
+        }
+        
+        await streamingService.sendMessage(userMessage.content, fileIds: userMessage.attachedFileIds, conversationHistory: conversationHistory)
     }
     
     // MARK: - Branch Conversation

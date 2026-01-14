@@ -322,6 +322,8 @@ class ConversationViewModel: ObservableObject {
     func stopConversation() {
         guard isActive else { return }  // Prevent multiple calls
         
+        print("[ConversationViewModel] Stopping conversation mode - cleaning up all resources")
+        
         isActive = false
         state = .idle
         
@@ -337,6 +339,8 @@ class ConversationViewModel: ObservableObject {
         audioPipeline.onInterruption = nil
         speechRecognition.onTranscriptionComplete = nil
         speechRecognition.onPartialResult = nil
+        speechSynthesis.onSpeakingStarted = nil
+        speechSynthesis.onSpeakingFinished = nil
         
         // Disconnect WebSocket
         disconnectWebSocket()
@@ -347,6 +351,13 @@ class ConversationViewModel: ObservableObject {
         assistantResponse = ""
         audioLevel = 0
         speakingLevel = 0
+        
+        // Save conversation before cleanup
+        if !messages.isEmpty {
+            saveVoiceConversation()
+        }
+        
+        print("[ConversationViewModel] Conversation mode stopped and cleaned up")
     }
     
     // MARK: - Manual Calibration
