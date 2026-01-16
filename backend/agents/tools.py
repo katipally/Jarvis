@@ -1209,6 +1209,889 @@ return "Sent notification"
         return f"Error sending notification: {str(e)}"
 
 
+# ============== BROWSER AUTOMATION TOOLS ==============
+
+@tool
+async def browser_navigate_to_url(url: str, browser: str = "Safari") -> str:
+    """
+    Navigate to a URL in the specified browser. Opens the browser if not running.
+    
+    Args:
+        url: The URL to navigate to (e.g., "youtube.com" or "https://google.com")
+        browser: Browser to use - "Safari", "Chrome", "Arc", "Firefox" (default: Safari)
+    
+    Returns:
+        Result of the navigation
+    """
+    try:
+        # Ensure URL has protocol
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = "https://" + url
+        
+        safe_url = escape_applescript(url)
+        safe_browser = escape_applescript(browser)
+        
+        script = f'''
+tell application "{safe_browser}"
+    activate
+    delay 0.5
+    if (count of windows) = 0 then
+        make new document
+        delay 0.3
+    end if
+    set URL of front document to "{safe_url}"
+end tell
+delay 1.0
+return "Navigated to {safe_url} in {safe_browser}"
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Navigation failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Browser navigate error: {str(e)}")
+        return f"Error navigating: {str(e)}"
+
+
+@tool
+async def browser_focus_address_bar(browser: str = "Safari") -> str:
+    """
+    Focus the address/URL bar in the browser so you can type a URL.
+    After calling this, use type_text to enter the URL.
+    
+    Args:
+        browser: Browser name - "Safari", "Chrome", "Arc" (default: Safari)
+    
+    Returns:
+        Result of focusing the address bar
+    """
+    try:
+        safe_browser = escape_applescript(browser)
+        script = f'''
+tell application "{safe_browser}"
+    activate
+end tell
+delay 0.3
+tell application "System Events"
+    keystroke "l" using command down
+end tell
+delay 0.2
+return "Focused address bar in {safe_browser}"
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Failed to focus address bar: {result.error}"
+    except Exception as e:
+        logger.error(f"Focus address bar error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+@tool
+async def browser_new_tab(browser: str = "Safari") -> str:
+    """
+    Open a new tab in the browser.
+    
+    Args:
+        browser: Browser name (default: Safari)
+    
+    Returns:
+        Result of opening new tab
+    """
+    try:
+        safe_browser = escape_applescript(browser)
+        script = f'''
+tell application "{safe_browser}"
+    activate
+end tell
+delay 0.2
+tell application "System Events"
+    keystroke "t" using command down
+end tell
+delay 0.3
+return "Opened new tab in {safe_browser}"
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Failed: {result.error}"
+    except Exception as e:
+        logger.error(f"New tab error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+@tool
+async def browser_scroll(direction: str = "down", amount: int = 3) -> str:
+    """
+    Scroll the current page in the browser.
+    
+    Args:
+        direction: "up" or "down" (default: down)
+        amount: Number of scroll units (1-10, default: 3)
+    
+    Returns:
+        Result of scrolling
+    """
+    try:
+        amount = max(1, min(10, amount))
+        key_code = "125" if direction.lower() == "down" else "126"  # down=125, up=126
+        
+        script = f'''
+tell application "System Events"
+    repeat {amount} times
+        key code {key_code}
+        delay 0.1
+    end repeat
+end tell
+return "Scrolled {direction} {amount} times"
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Scroll failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Scroll error: {str(e)}")
+        return f"Error scrolling: {str(e)}"
+
+
+@tool
+async def browser_search_on_page(search_text: str) -> str:
+    """
+    Use browser's find feature (Cmd+F) to search for text on the current page.
+    
+    Args:
+        search_text: Text to search for on the page
+    
+    Returns:
+        Result of the search
+    """
+    try:
+        safe_text = escape_applescript(search_text)
+        script = f'''
+tell application "System Events"
+    keystroke "f" using command down
+    delay 0.3
+    keystroke "{safe_text}"
+    delay 0.2
+end tell
+return "Searching page for: {safe_text}"
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Search failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Page search error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+@tool
+async def browser_click_link_by_text(link_text: str, browser: str = "Safari") -> str:
+    """
+    Click a link or button by its visible text using JavaScript injection.
+    Works best with Safari and Chrome.
+    
+    Args:
+        link_text: The visible text of the link/button to click
+        browser: Browser name (default: Safari)
+    
+    Returns:
+        Result of clicking
+    """
+    try:
+        safe_text = escape_applescript(link_text)
+        safe_browser = escape_applescript(browser)
+        
+        if browser.lower() == "safari":
+            script = f'''
+tell application "Safari"
+    do JavaScript "
+        (function() {{
+            var elements = document.querySelectorAll('a, button, [role=button], input[type=submit], input[type=button]');
+            for (var el of elements) {{
+                if (el.textContent.toLowerCase().includes('{safe_text.lower()}') || 
+                    (el.value && el.value.toLowerCase().includes('{safe_text.lower()}')) ||
+                    (el.getAttribute('aria-label') && el.getAttribute('aria-label').toLowerCase().includes('{safe_text.lower()}'))) {{
+                    el.click();
+                    return 'Clicked: ' + (el.textContent || el.value || el.getAttribute('aria-label')).substring(0, 50);
+                }}
+            }}
+            return 'Element not found with text: {safe_text}';
+        }})();
+    " in front document
+end tell
+'''
+        else:
+            # For Chrome/Arc
+            script = f'''
+tell application "{safe_browser}"
+    execute front window's active tab javascript "
+        (function() {{
+            var elements = document.querySelectorAll('a, button, [role=button], input[type=submit]');
+            for (var el of elements) {{
+                if (el.textContent.toLowerCase().includes('{safe_text.lower()}')) {{
+                    el.click();
+                    return 'Clicked: ' + el.textContent.substring(0, 50);
+                }}
+            }}
+            return 'Element not found';
+        }})();
+    "
+end tell
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Click failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Click link error: {str(e)}")
+        return f"Error clicking: {str(e)}"
+
+
+@tool
+async def browser_type_in_search_box(search_text: str, browser: str = "Safari") -> str:
+    """
+    Find and type in a search input box on the current page.
+    Useful for sites like YouTube, Google, etc.
+    
+    Args:
+        search_text: Text to type in the search box
+        browser: Browser name (default: Safari)
+    
+    Returns:
+        Result of typing
+    """
+    try:
+        safe_text = escape_applescript(search_text)
+        safe_browser = escape_applescript(browser)
+        
+        if browser.lower() == "safari":
+            script = f'''
+tell application "Safari"
+    do JavaScript "
+        (function() {{
+            var searchInputs = document.querySelectorAll('input[type=search], input[type=text][name*=search], input[type=text][name*=query], input[name=q], input[id*=search], input[placeholder*=Search], textarea[name*=search]');
+            if (searchInputs.length > 0) {{
+                var input = searchInputs[0];
+                input.focus();
+                input.value = '{safe_text}';
+                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                return 'Typed in search box';
+            }}
+            return 'No search box found';
+        }})();
+    " in front document
+end tell
+'''
+        else:
+            script = f'''
+tell application "{safe_browser}"
+    execute front window's active tab javascript "
+        (function() {{
+            var searchInputs = document.querySelectorAll('input[type=search], input[name=q], input[id*=search]');
+            if (searchInputs.length > 0) {{
+                searchInputs[0].focus();
+                searchInputs[0].value = '{safe_text}';
+                return 'Typed in search box';
+            }}
+            return 'No search box found';
+        }})();
+    "
+end tell
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            # Also press Enter to submit
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Type in search box error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+@tool
+async def browser_get_page_info(browser: str = "Safari") -> str:
+    """
+    Get information about the current page - title, URL, and main headings.
+    
+    Args:
+        browser: Browser name (default: Safari)
+    
+    Returns:
+        Page information
+    """
+    try:
+        safe_browser = escape_applescript(browser)
+        
+        if browser.lower() == "safari":
+            script = f'''
+tell application "Safari"
+    set pageURL to URL of front document
+    set pageTitle to name of front document
+    set pageInfo to "Title: " & pageTitle & linefeed & "URL: " & pageURL
+    try
+        set headings to do JavaScript "
+            Array.from(document.querySelectorAll('h1, h2')).slice(0,5).map(h => h.textContent.trim()).join(', ');
+        " in front document
+        set pageInfo to pageInfo & linefeed & "Headings: " & headings
+    end try
+    return pageInfo
+end tell
+'''
+        else:
+            script = f'''
+tell application "{safe_browser}"
+    set pageURL to URL of active tab of front window
+    set pageTitle to title of active tab of front window
+    return "Title: " & pageTitle & linefeed & "URL: " & pageURL
+end tell
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"📄 {result.output}"
+        else:
+            return f"❌ Failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Get page info error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+@tool
+async def browser_submit_form() -> str:
+    """
+    Press Enter to submit the current form or search.
+    Use after typing in a search box or form field.
+    
+    Returns:
+        Result of pressing Enter
+    """
+    try:
+        script = '''
+tell application "System Events"
+    key code 36
+end tell
+delay 0.5
+return "Pressed Enter to submit"
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Submit form error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+# ============== SCREEN CAPTURE & ANALYSIS TOOLS ==============
+
+@tool
+async def capture_screen_for_analysis() -> str:
+    """
+    Capture a screenshot of the current screen to understand what's visible.
+    Returns a description of screen dimensions and saves screenshot for reference.
+    
+    Use this tool to verify if an action worked or to understand the current state.
+    
+    Returns:
+        Screenshot path and screen information
+    """
+    try:
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        screenshot_path = f"/tmp/jarvis_screen_{timestamp}.png"
+        
+        script = f'''
+do shell script "screencapture -x {screenshot_path}"
+set screenInfo to ""
+
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set appName to name of frontApp
+    try
+        set winName to name of front window of frontApp
+        set winPos to position of front window of frontApp
+        set winSize to size of front window of frontApp
+        set screenInfo to "Active App: " & appName & linefeed & "Window: " & winName & linefeed & "Position: " & (item 1 of winPos) & "," & (item 2 of winPos) & linefeed & "Size: " & (item 1 of winSize) & "x" & (item 2 of winSize)
+    on error
+        set screenInfo to "Active App: " & appName & " (no window info)"
+    end try
+end tell
+
+return screenInfo & linefeed & "Screenshot saved to: {screenshot_path}"
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"📸 Screen captured!\n{result.output}"
+        else:
+            return f"❌ Capture failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Screen capture error: {str(e)}")
+        return f"Error capturing screen: {str(e)}"
+
+
+@tool
+async def wait_seconds(seconds: float = 1.0) -> str:
+    """
+    Wait for a specified number of seconds before continuing.
+    Use this between actions to allow apps/pages to load.
+    
+    Args:
+        seconds: Number of seconds to wait (0.5 to 10, default: 1.0)
+    
+    Returns:
+        Confirmation of waiting
+    """
+    import asyncio
+    try:
+        seconds = max(0.5, min(10, seconds))
+        await asyncio.sleep(seconds)
+        return f"✅ Waited {seconds} seconds"
+    except Exception as e:
+        return f"Error waiting: {str(e)}"
+
+
+@tool
+async def get_screen_text_content() -> str:
+    """
+    Get visible text content from the frontmost application window.
+    Useful for reading what's displayed on screen.
+    
+    Returns:
+        Text content visible on screen
+    """
+    try:
+        script = '''
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set appName to name of frontApp
+    set textContent to "App: " & appName & linefeed
+    
+    try
+        set frontWin to front window of frontApp
+        set winName to name of frontWin
+        set textContent to textContent & "Window: " & winName & linefeed & linefeed
+        
+        -- Get static text elements
+        set textContent to textContent & "Visible Text:" & linefeed
+        try
+            set staticTexts to value of every static text of frontWin
+            repeat with t in staticTexts
+                if t is not missing value and length of (t as text) > 0 then
+                    set textContent to textContent & t & linefeed
+                end if
+            end repeat
+        end try
+        
+        -- Get button names
+        try
+            set buttonNames to name of every button of frontWin
+            set textContent to textContent & linefeed & "Buttons: " & (buttonNames as text)
+        end try
+        
+    on error errMsg
+        set textContent to textContent & "Could not read window content: " & errMsg
+    end try
+    
+    return textContent
+end tell
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"📝 Screen Content:\n{result.output}"
+        else:
+            return f"❌ Failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Get screen text error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+# ============== GENERAL WEB PAGE INTERACTION TOOLS ==============
+
+@tool
+async def web_page_get_interactive_elements(browser: str = "Safari") -> str:
+    """
+    Get all interactive elements (links, buttons, inputs, videos) on the current web page.
+    Returns a numbered list that can be used with web_page_click_element.
+    
+    Args:
+        browser: Browser name (default: Safari)
+    
+    Returns:
+        Numbered list of interactive elements with their types and text
+    """
+    try:
+        if browser.lower() == "safari":
+            script = '''
+tell application "Safari"
+    set elementList to do JavaScript "
+        (function() {
+            var elements = [];
+            var selectors = [
+                {sel: 'a[href]', type: 'link'},
+                {sel: 'button', type: 'button'},
+                {sel: 'input[type=submit], input[type=button]', type: 'button'},
+                {sel: 'input[type=text], input[type=search], input[type=email], textarea', type: 'input'},
+                {sel: 'video', type: 'video'},
+                {sel: '[role=button]', type: 'button'},
+                {sel: '[onclick]', type: 'clickable'}
+            ];
+            var seen = new Set();
+            selectors.forEach(function(s) {
+                document.querySelectorAll(s.sel).forEach(function(el) {
+                    if (seen.has(el)) return;
+                    seen.add(el);
+                    var text = (el.textContent || el.value || el.placeholder || el.getAttribute('aria-label') || el.title || '').trim().substring(0, 60);
+                    if (text || s.type === 'input' || s.type === 'video') {
+                        var rect = el.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0) {
+                            elements.push({type: s.type, text: text || '[' + s.type + ']', tag: el.tagName.toLowerCase()});
+                        }
+                    }
+                });
+            });
+            return elements.slice(0, 20).map(function(e, i) {
+                return (i+1) + '. [' + e.type + '] ' + e.text;
+            }).join('\\n') || 'No interactive elements found';
+        })();
+    " in front document
+    return elementList
+end tell
+'''
+        else:
+            script = f'''
+tell application "{browser}"
+    set elementList to execute front window's active tab javascript "
+        (function() {{
+            var elements = document.querySelectorAll('a, button, input, [role=button]');
+            return Array.from(elements).slice(0, 20).map(function(el, i) {{
+                var text = (el.textContent || el.value || el.placeholder || '').trim().substring(0, 50);
+                return (i+1) + '. ' + el.tagName + ': ' + text;
+            }}).join('\\n') || 'No elements found';
+        }})();
+    "
+    return elementList
+end tell
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"📋 Interactive Elements:\n{result.output}"
+        else:
+            return f"❌ Failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Get elements error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+@tool
+async def web_page_click_element(element_text: str, browser: str = "Safari") -> str:
+    """
+    Click an element on the web page by searching for its text content.
+    The search is case-insensitive and matches partial text.
+    
+    Args:
+        element_text: Text to search for in clickable elements (links, buttons, etc.)
+        browser: Browser name (default: Safari)
+    
+    Returns:
+        Result of clicking the element
+    """
+    try:
+        safe_text = escape_applescript(element_text.lower())
+        
+        if browser.lower() == "safari":
+            script = f'''
+tell application "Safari"
+    set clickResult to do JavaScript "
+        (function() {{
+            var searchText = '{safe_text}'.toLowerCase();
+            var elements = document.querySelectorAll('a, button, [role=button], input[type=submit], input[type=button], [onclick]');
+            for (var el of elements) {{
+                var elText = (el.textContent || el.value || el.getAttribute('aria-label') || el.title || '').toLowerCase();
+                if (elText.includes(searchText)) {{
+                    el.click();
+                    return 'Clicked: ' + (el.textContent || el.value || 'element').substring(0, 50).trim();
+                }}
+            }}
+            // Try clicking by aria-label or title
+            var byLabel = document.querySelector('[aria-label*=\\\"' + searchText + '\\\" i], [title*=\\\"' + searchText + '\\\" i]');
+            if (byLabel) {{
+                byLabel.click();
+                return 'Clicked element with label containing: ' + searchText;
+            }}
+            return 'No element found containing: ' + searchText;
+        }})();
+    " in front document
+    return clickResult
+end tell
+'''
+        else:
+            script = f'''
+tell application "{browser}"
+    set clickResult to execute front window's active tab javascript "
+        (function() {{
+            var searchText = '{safe_text}'.toLowerCase();
+            var elements = document.querySelectorAll('a, button, [role=button]');
+            for (var el of elements) {{
+                if (el.textContent.toLowerCase().includes(searchText)) {{
+                    el.click();
+                    return 'Clicked: ' + el.textContent.substring(0, 50);
+                }}
+            }}
+            return 'Element not found';
+        }})();
+    "
+    return clickResult
+end tell
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Click failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Click element error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+@tool
+async def web_page_get_text_content(browser: str = "Safari") -> str:
+    """
+    Get the main text content of the current web page.
+    Useful for understanding what's displayed on the page.
+    
+    Args:
+        browser: Browser name (default: Safari)
+    
+    Returns:
+        Main text content of the page (headings, paragraphs, lists)
+    """
+    try:
+        if browser.lower() == "safari":
+            script = '''
+tell application "Safari"
+    set pageTitle to name of front document
+    set pageURL to URL of front document
+    set pageContent to do JavaScript "
+        (function() {
+            var content = [];
+            // Get headings
+            document.querySelectorAll('h1, h2, h3').forEach(function(h) {
+                var text = h.textContent.trim();
+                if (text) content.push('[' + h.tagName + '] ' + text);
+            });
+            // Get main content paragraphs
+            var mainContent = document.querySelector('main, article, [role=main], .content, #content') || document.body;
+            mainContent.querySelectorAll('p, li').forEach(function(p) {
+                var text = p.textContent.trim();
+                if (text && text.length > 20) content.push(text.substring(0, 200));
+            });
+            return content.slice(0, 15).join('\\n\\n') || 'No text content found';
+        })();
+    " in front document
+    return "Page: " & pageTitle & linefeed & "URL: " & pageURL & linefeed & linefeed & pageContent
+end tell
+'''
+        else:
+            script = f'''
+tell application "{browser}"
+    set pageTitle to title of active tab of front window
+    set pageURL to URL of active tab of front window
+    return "Page: " & pageTitle & linefeed & "URL: " & pageURL
+end tell
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"📄 {result.output}"
+        else:
+            return f"❌ Failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Get page content error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+@tool
+async def web_page_fill_input(input_text: str, field_identifier: str = "", browser: str = "Safari") -> str:
+    """
+    Fill in an input field on the current web page.
+    If field_identifier is empty, fills the first visible input/search field.
+    
+    Args:
+        input_text: Text to type into the input field
+        field_identifier: Optional - name, id, or placeholder text to identify the field
+        browser: Browser name (default: Safari)
+    
+    Returns:
+        Result of filling the input
+    """
+    try:
+        safe_text = escape_applescript(input_text)
+        safe_field = escape_applescript(field_identifier.lower()) if field_identifier else ""
+        
+        if browser.lower() == "safari":
+            if safe_field:
+                script = f'''
+tell application "Safari"
+    set fillResult to do JavaScript "
+        (function() {{
+            var searchField = '{safe_field}'.toLowerCase();
+            var inputs = document.querySelectorAll('input[type=text], input[type=search], input[type=email], input:not([type]), textarea');
+            for (var input of inputs) {{
+                var name = (input.name || '').toLowerCase();
+                var id = (input.id || '').toLowerCase();
+                var placeholder = (input.placeholder || '').toLowerCase();
+                if (name.includes(searchField) || id.includes(searchField) || placeholder.includes(searchField)) {{
+                    input.focus();
+                    input.value = '{safe_text}';
+                    input.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    input.dispatchEvent(new Event('change', {{bubbles: true}}));
+                    return 'Filled input: ' + (input.name || input.id || input.placeholder || 'field');
+                }}
+            }}
+            return 'No input field found matching: ' + searchField;
+        }})();
+    " in front document
+    return fillResult
+end tell
+'''
+            else:
+                script = f'''
+tell application "Safari"
+    set fillResult to do JavaScript "
+        (function() {{
+            var inputs = document.querySelectorAll('input[type=text], input[type=search], input:not([type]), textarea');
+            for (var input of inputs) {{
+                var rect = input.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0 && rect.top >= 0) {{
+                    input.focus();
+                    input.value = '{safe_text}';
+                    input.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    input.dispatchEvent(new Event('change', {{bubbles: true}}));
+                    return 'Filled first visible input field';
+                }}
+            }}
+            return 'No visible input field found';
+        }})();
+    " in front document
+    return fillResult
+end tell
+'''
+        else:
+            script = f'''
+tell application "{browser}"
+    execute front window's active tab javascript "
+        document.querySelector('input[type=search], input[type=text], input:not([type])').value = '{safe_text}';
+    "
+    return "Filled input field"
+end tell
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Fill input error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+@tool
+async def web_page_execute_action(action: str, browser: str = "Safari") -> str:
+    """
+    Execute a common web page action using keyboard shortcuts.
+    
+    Args:
+        action: Action to perform - "submit" (Enter), "back" (go back), "forward", 
+                "refresh", "scroll_down", "scroll_up", "select_all", "copy", "paste",
+                "find" (open find dialog), "close_tab", "new_tab"
+        browser: Browser name (default: Safari)
+    
+    Returns:
+        Result of the action
+    """
+    try:
+        action_map = {
+            "submit": ("key code 36", "Pressed Enter to submit"),
+            "back": ("keystroke \"[\" using command down", "Navigated back"),
+            "forward": ("keystroke \"]\" using command down", "Navigated forward"),
+            "refresh": ("keystroke \"r\" using command down", "Refreshed page"),
+            "scroll_down": ("key code 125\nkey code 125\nkey code 125", "Scrolled down"),
+            "scroll_up": ("key code 126\nkey code 126\nkey code 126", "Scrolled up"),
+            "select_all": ("keystroke \"a\" using command down", "Selected all"),
+            "copy": ("keystroke \"c\" using command down", "Copied to clipboard"),
+            "paste": ("keystroke \"v\" using command down", "Pasted from clipboard"),
+            "find": ("keystroke \"f\" using command down", "Opened find dialog"),
+            "close_tab": ("keystroke \"w\" using command down", "Closed tab"),
+            "new_tab": ("keystroke \"t\" using command down", "Opened new tab"),
+        }
+        
+        if action.lower() not in action_map:
+            return f"❌ Unknown action: {action}. Available: {', '.join(action_map.keys())}"
+        
+        keystroke, description = action_map[action.lower()]
+        safe_browser = escape_applescript(browser)
+        
+        script = f'''
+tell application "{safe_browser}"
+    activate
+end tell
+delay 0.2
+tell application "System Events"
+    {keystroke}
+end tell
+delay 0.3
+return "{description}"
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return f"✅ {result.output}"
+        else:
+            return f"❌ Failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Web action error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
+@tool
+async def verify_app_is_frontmost(app_name: str) -> str:
+    """
+    Verify that a specific app is the frontmost (active) application.
+    
+    Args:
+        app_name: Name of the app to check
+    
+    Returns:
+        Whether the app is frontmost
+    """
+    try:
+        safe_app = escape_applescript(app_name)
+        script = f'''
+tell application "System Events"
+    set frontApp to name of first application process whose frontmost is true
+    if frontApp contains "{safe_app}" then
+        return "✓ {safe_app} is frontmost"
+    else
+        return "✗ {safe_app} is NOT frontmost. Current app: " & frontApp
+    end if
+end tell
+'''
+        result = await mac_automation.execute_applescript(script)
+        if result.success:
+            return result.output
+        else:
+            return f"❌ Check failed: {result.error}"
+    except Exception as e:
+        logger.error(f"Verify app error: {str(e)}")
+        return f"Error: {str(e)}"
+
+
 def get_tools():
     """Return list of available tools."""
     return [
@@ -1245,4 +2128,25 @@ def get_tools():
         reveal_in_finder,
         get_current_media_info,
         send_system_notification,
+        # Browser Automation (NEW)
+        browser_navigate_to_url,
+        browser_focus_address_bar,
+        browser_new_tab,
+        browser_scroll,
+        browser_search_on_page,
+        browser_click_link_by_text,
+        browser_type_in_search_box,
+        browser_get_page_info,
+        browser_submit_form,
+        # Screen Understanding
+        capture_screen_for_analysis,
+        wait_seconds,
+        get_screen_text_content,
+        verify_app_is_frontmost,
+        # Web Page Interaction (General Purpose)
+        web_page_get_interactive_elements,
+        web_page_click_element,
+        web_page_get_text_content,
+        web_page_fill_input,
+        web_page_execute_action,
     ]

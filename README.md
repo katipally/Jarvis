@@ -9,7 +9,8 @@
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
 ![macOS](https://img.shields.io/badge/macOS-13.0+-black.svg)
-![Scripts](https://img.shields.io/badge/AppleScripts-75+-purple.svg)
+![Scripts](https://img.shields.io/badge/AppleScripts-100+-purple.svg)
+![Tools](https://img.shields.io/badge/AI_Tools-43-red.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 ## 🚀 Overview
@@ -17,7 +18,7 @@
 Jarvis is a cutting-edge AI assistant that combines voice conversation, computer vision, screen understanding, and deep Mac automation capabilities. Built with Swift 6/SwiftUI for the frontend and FastAPI/LangGraph for the backend, Jarvis offers a truly multimodal experience with support for local LLMs via Ollama.
 
 **What makes Jarvis unique:**
-- 🖥️ **Deep macOS Integration** — 75+ AppleScripts + Accessibility APIs
+- 🖥️ **Deep macOS Integration** — 100+ AppleScripts + 43 AI Tools + Accessibility APIs
 - 👁️ **Screen Understanding** — Capture & analyze any screen, window, or selection
 - 🎯 **Always-on-Top Focus Mode** — Like Cluely, but with full AI capabilities
 - 🔒 **Privacy-First** — Local LLM support, no cloud dependency required
@@ -39,7 +40,7 @@ Jarvis is a cutting-edge AI assistant that combines voice conversation, computer
 - **Accessibility inspection** — Read UI elements, buttons, text fields
 - **Document processing** — PDF, images, text with OCR
 
-### 🖥️ Mac Automation (75+ Scripts)
+### 🖥️ Mac Automation (100+ Scripts, 43 Tools)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -116,7 +117,7 @@ Jarvis is a cutting-edge AI assistant that combines voice conversation, computer
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                  │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Mac Automation Layer (75+ Scripts)          │   │
+│  │            Mac Automation Layer (100+ Scripts)            │   │
 │  │  ┌──────────┬──────────┬──────────┬────────────────┐    │   │
 │  │  │ System   │   Apps   │  Screen  │ Accessibility │    │   │
 │  │  │ Control  │  Control │  Capture │   UI Control  │    │   │
@@ -208,7 +209,7 @@ Jarvis/
 │   ├── services/
 │   │   ├── mac_automation/    # AppleScript engine
 │   │   │   ├── executor.py    # Safe script execution
-│   │   │   └── scripts.py     # 75+ pre-built scripts
+│   │   │   └── scripts.py     # 100+ pre-built scripts
 │   │   ├── file_processor/    # Document processing
 │   │   └── search_service.py  # Web search
 │   └── core/
@@ -234,7 +235,7 @@ Jarvis/
 │           ├── SpeechRecognitionService.swift
 │           └── SpeechSynthesisService.swift
 │
-├── JARVIS_FEATURES.md         # Full feature roadmap
+├── MAC_CONTROL.md             # Mac automation documentation
 └── README.md                  # This file
 ```
 
@@ -277,18 +278,24 @@ CHROMA_DB_PATH=./chroma_db
 MAX_FILE_SIZE=10485760
 ```
 
-## 🔧 Available Tools
+## 🔧 Available Tools (43 Total)
 
 The AI has access to these tool categories:
 
-| Tool | Description |
-|------|-------------|
-| `run_mac_script` | Execute pre-built AppleScripts |
-| `execute_applescript` | Run custom AppleScript code |
-| `execute_shell_command` | Safe shell commands |
-| `search_knowledge_base` | Search uploaded documents |
-| `web_search` | Internet search via DuckDuckGo |
-| `process_uploaded_file` | Analyze files |
+| Category | Tools | Description |
+|----------|-------|-------------|
+| **Knowledge** | 3 | `search_knowledge_base`, `web_search`, `process_uploaded_file` |
+| **Mac Basic** | 4 | `run_mac_script`, `execute_applescript`, `execute_shell_command`, `get_available_mac_scripts` |
+| **App Control** | 5 | `launch_app`, `quit_app`, `hide_app`, `get_running_apps`, `get_frontmost_app` |
+| **Browser** | 9 | Navigate, focus, scroll, click, search, get page info |
+| **Web Page** | 5 | Get elements, click, fill inputs, execute actions |
+| **Input** | 3 | `click_at_position`, `type_text`, `press_keyboard_shortcut` |
+| **UI Access** | 2 | `get_ui_elements`, `click_ui_element` |
+| **Screen** | 4 | `capture_screen_for_analysis`, `wait_seconds`, `get_screen_text_content`, `verify_app_is_frontmost` |
+| **System** | 6 | `get_system_state`, `open_file_or_url`, `reveal_in_finder`, `get_current_media_info`, `send_system_notification`, `manage_window` |
+| **Shortcuts** | 2 | `run_shortcut`, `list_shortcuts` |
+
+See [MAC_CONTROL.md](MAC_CONTROL.md) for complete documentation.
 
 ## 🛡️ Safety Guardrails
 

@@ -323,11 +323,37 @@ class WorkspaceMonitor: ObservableObject {
     
     // MARK: - File Operations
     func openFile(path: String) -> Bool {
-        return workspace.openFile(path)
+        let url = URL(fileURLWithPath: path)
+        return workspace.open(url)
     }
     
     func openFile(path: String, withApplication appName: String) -> Bool {
-        return workspace.openFile(path, withApplication: appName)
+        let fileURL = URL(fileURLWithPath: path)
+        
+        // Helper to perform the open with error logging
+        func open(appURL: URL) {
+            workspace.open([fileURL], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                if let error = error {
+                    print("[WorkspaceMonitor] Failed to open file with app: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        if let appURL = workspace.urlForApplication(withBundleIdentifier: appName) ?? 
+              NSWorkspace.shared.urlsForApplications(withBundleIdentifier: appName).first ??
+              workspace.urlForApplication(toOpen: fileURL) {
+            open(appURL: appURL)
+            return true
+        }
+        
+        // Fallback: try to find app by name
+        let apps = NSWorkspace.shared.runningApplications.filter { $0.localizedName == appName }
+        if let app = apps.first, let bundleURL = app.bundleURL {
+            open(appURL: bundleURL)
+            return true
+        }
+        
+        return false
     }
     
     func openURL(_ url: URL) -> Bool {
@@ -370,7 +396,7 @@ class WorkspaceMonitor: ObservableObject {
     }
     
     func getDefaultApp(forExtension ext: String) -> String? {
-        guard let uti = UTType(filenameExtension: ext) else { return nil }
+        guard UTType(filenameExtension: ext) != nil else { return nil }
         guard let appURL = workspace.urlForApplication(toOpen: URL(fileURLWithPath: "test.\(ext)")) else { return nil }
         return appURL.lastPathComponent.replacingOccurrences(of: ".app", with: "")
     }

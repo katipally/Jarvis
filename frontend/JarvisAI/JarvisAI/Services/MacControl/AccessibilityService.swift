@@ -213,7 +213,7 @@ class AccessibilityService: ObservableObject {
             if let frame = getFrame(targetElement) {
                 let centerX = frame.origin.x + frame.size.width / 2
                 let centerY = frame.origin.y + frame.size.height / 2
-                await InputSimulator.shared.clickAt(x: centerX, y: centerY)
+                InputSimulator.shared.clickAt(x: centerX, y: centerY)
                 return "Clicked at position: (\(centerX), \(centerY))"
             }
             return "Failed to click element"
@@ -251,7 +251,7 @@ class AccessibilityService: ObservableObject {
             return "Could not find application: \(appName)"
         }
         
-        var menuBars: [AXUIElement] = findElements(in: appElement, withRole: kAXMenuBarRole, maxDepth: 2)
+        let menuBars: [AXUIElement] = findElements(in: appElement, withRole: kAXMenuBarRole, maxDepth: 2)
         guard let menuBar = menuBars.first else {
             return "Could not find menu bar"
         }
