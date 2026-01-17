@@ -4,9 +4,13 @@ struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     @ObservedObject var viewModel: ChatViewModel
     @AppStorage("apiBaseURL") private var apiBaseURL = "http://localhost:8000/api"
-    @AppStorage("includeReasoning") private var includeReasoning = true
     @AppStorage("appTheme") private var appTheme: AppTheme = .system
     @AppStorage("showTokenCount") private var showTokenCount = true
+    
+    // AI Provider Settings
+    @AppStorage("aiProvider") private var aiProvider = "openai"
+    @AppStorage("openaiModel") private var openaiModel = "gpt-5-nano"
+    @AppStorage("ollamaModel") private var ollamaModel = "qwen3:8b"
     
     var body: some View {
         NavigationStack {
@@ -19,19 +23,47 @@ struct SettingsView: View {
                     } label: {
                         Label("Appearance", systemImage: "paintbrush")
                     }
+                    Toggle(isOn: $showTokenCount) {
+                        Label("Show Token Usage", systemImage: "cpu")
+                    }
                 } header: {
                     Text("General")
                 }
                 
                 Section {
-                    Toggle(isOn: $includeReasoning) {
-                        Label("Show AI Reasoning", systemImage: "brain")
+                    Picker("AI Brain", selection: $aiProvider) {
+                        Text("OpenAI (Cloud)").tag("openai")
+                        Text("Ollama (Local)").tag("ollama")
                     }
-                    Toggle(isOn: $showTokenCount) {
-                        Label("Show Token Usage", systemImage: "cpu")
+                    .pickerStyle(.segmented)
+                    
+                    if aiProvider == "openai" {
+                        // OpenAI: Free text input as requested
+                        TextField("Model Name", text: $openaiModel)
+                            .help("Enter the OpenAI model ID (e.g., gpt-4o, o1-mini, o3-mini)")
+                        
+                        Text("Common: gpt-4o, o1-mini, o3-mini")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            
+                    } else {
+                        // Ollama: Dropdown from local models
+                        if let models = viewModel.availableModels?.ollama {
+                            Picker("Model", selection: $ollamaModel) {
+                                ForEach(models, id: \.id) { model in
+                                    Text(model.name).tag(model.id)
+                                }
+                            }
+                        } else {
+                            Text("Loading Ollama models...").font(.caption)
+                        }
+                        
+                        Text("Make sure 'ollama serve' is running")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 } header: {
-                    Text("Intelligence")
+                    Text("Model Configuration")
                 }
                 
                 Section {
@@ -70,9 +102,24 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .frame(width: 480, height: 550)
+            .frame(width: 480, height: 600)
             .background(MacOS26Materials.sidebar)
+            .onChange(of: aiProvider) { newValue in syncSettings() }
+            .onChange(of: openaiModel) { newValue in syncSettings() }
+            .onChange(of: ollamaModel) { newValue in syncSettings() }
+            .onAppear {
+                viewModel.fetchModels()
+                syncSettings()
+            }
         }
+    }
+    
+    private func syncSettings() {
+        viewModel.updateAISettings(
+            provider: aiProvider,
+            openaiModel: openaiModel,
+            ollamaModel: ollamaModel
+        )
     }
 }
 

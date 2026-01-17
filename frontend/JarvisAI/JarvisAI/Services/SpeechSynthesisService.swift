@@ -321,43 +321,15 @@ class SpeechSynthesisService: NSObject, ObservableObject {
         synthesizer.speak(utterance)
     }
     
-    // MARK: - SSML Support for Natural Speech
-    private func createSSMLUtterance(for text: String) -> AVSpeechUtterance? {
-        // Create SSML with natural prosody adjustments
-        // SSML allows fine-grained control over speech synthesis
-        let escapedText = text
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-        
-        // Add natural pauses after punctuation and adjust prosody
-        var processedText = escapedText
-        
-        // Add slight pauses after commas for natural rhythm
-        processedText = processedText.replacingOccurrences(of: ",", with: ",<break time=\"150ms\"/>")
-        
-        // Add medium pauses after colons and semicolons
-        processedText = processedText.replacingOccurrences(of: ":", with: ":<break time=\"200ms\"/>")
-        processedText = processedText.replacingOccurrences(of: ";", with: ";<break time=\"200ms\"/>")
-        
-        // Convert speech rate to SSML percentage (0.5 = 100%, 0.25 = 50%, 0.75 = 150%)
-        let ratePercent = Int((speechRate / AVSpeechUtteranceDefaultSpeechRate) * 100)
-        
-        let ssml = """
-        <speak>
-            <prosody rate="\(ratePercent)%" pitch="\(Int((speechPitch - 1.0) * 100))%">
-                \(processedText)
-            </prosody>
-        </speak>
-        """
-        
-        return AVSpeechUtterance(ssmlRepresentation: ssml)
-    }
-    
     // MARK: - Text Preprocessing for Natural Speech
     private func preprocessTextForSpeech(_ text: String) -> String {
         var result = text
+        
+        // Remove Emojis (they sound robotic when spoken)
+        // Match emoji characters and remove them
+        if let regex = try? NSRegularExpression(pattern: "[\\p{Emoji_Presentation}\\p{Extended_Pictographic}]", options: []) {
+            result = regex.stringByReplacingMatches(in: result, options: [], range: NSRange(result.startIndex..., in: result), withTemplate: "")
+        }
         
         // Remove markdown formatting
         result = result.replacingOccurrences(of: "**", with: "")
@@ -399,7 +371,97 @@ class SpeechSynthesisService: NSObject, ObservableObject {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
-    // MARK: - Speak with Streaming (for LLM responses - low latency)
+    // MARK: - SSML Support for Natural Speech
+    private func createSSMLUtterance(for text: String) -> AVSpeechUtterance? {
+        // Create SSML with natural prosody adjustments
+        // SSML allows fine-grained control over speech synthesis
+        let escapedText = text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+        
+        // Add natural pauses after punctuation and adjust prosody
+        var processedText = escapedText
+        
+        // Add slight pauses after commas for natural rhythm
+        processedText = processedText.replacingOccurrences(of: ",", with: ",<break time=\"150ms\"/>")
+        
+        // Add medium pauses after colons and semicolons
+        processedText = processedText.replacingOccurrences(of: ":", with: ":<break time=\"200ms\"/>")
+        processedText = processedText.replacingOccurrences(of: ";", with: ";<break time=\"200ms\"/>")
+        
+        // Convert speech rate to SSML percentage (0.5 = 100%, 0.25 = 50%, 0.75 = 150%)
+        let ratePercent = Int((speechRate / AVSpeechUtteranceDefaultSpeechRate) * 100)
+        
+        // Add initial silence to prevent clipping (100ms)
+        let ssml = """
+        <speak>
+            <break time=\"100ms\"/>
+            <prosody rate=\"\(ratePercent)%\" pitch=\"\(Int((speechPitch - 1.0) * 100))%\">
+                \(processedText)
+            </prosody>
+        </speak>
+        """
+        
+        return AVSpeechUtterance(ssmlRepresentation: ssml)
+    }
+    
+    // MARK: - Ultra-Low Latency Chunk Speaking (for real-time conversation)
+    /// Speaks a chunk immediately without waiting for sentence boundaries
+    func speakChunk(_ chunk: String) {
+        let cleaned = preprocessTextForSpeech(chunk)
+        guard !cleaned.isEmpty else { return }
+        
+        // Queue the chunk for immediate playback
+        utteranceQueue.append(cleaned)
+        
+        // Start speaking immediately if not already
+        if !isSpeaking {
+            processQueueFast()
+        }
+    }
+    
+    /// Fast queue processing with minimal delays
+    private func processQueueFast() {
+        guard !utteranceQueue.isEmpty else { return }
+        
+        let text = utteranceQueue.removeFirst()
+        if !text.isEmpty {
+            performSpeakFast(text)
+        }
+    }
+    
+    /// Ultra-fast speak without SSML overhead
+    private func performSpeakFast(_ text: String) {
+        // Create simple utterance without SSML for minimal latency
+        let utterance = AVSpeechUtterance(string: text)
+        
+        // Set voice
+        if !selectedVoiceIdentifier.isEmpty,
+           let voice = AVSpeechSynthesisVoice(identifier: selectedVoiceIdentifier) {
+            utterance.voice = voice
+        } else {
+            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        }
+        
+        // Optimized settings for low latency
+        utterance.rate = speechRate
+        utterance.pitchMultiplier = speechPitch
+        utterance.volume = speechVolume
+        
+        // ZERO delays for instant playback
+        utterance.preUtteranceDelay = 0
+        utterance.postUtteranceDelay = 0
+        utterance.prefersAssistiveTechnologySettings = false
+        
+        isSpeaking = true
+        currentUtterance = text
+        onSpeakingStarted?()
+        synthesizer.speak(utterance)
+    }
+    
+    // MARK: - Speak with Streaming (legacy - for LLM responses)
     func speakStreaming(_ textChunk: String) {
         sentenceBuffer += textChunk
         
@@ -529,9 +591,9 @@ extension SpeechSynthesisService: AVSpeechSynthesizerDelegate {
         Task { @MainActor in
             self.speakingProgress = 1.0
             
-            // Check if there's more in the queue
+            // Check if there's more in the queue - use fast processing for low latency
             if !self.utteranceQueue.isEmpty {
-                self.processQueue()
+                self.processQueueFast()
             } else {
                 self.isSpeaking = false
                 self.currentUtterance = ""

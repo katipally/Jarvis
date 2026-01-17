@@ -38,12 +38,12 @@ class AudioPipeline: ObservableObject {
     private let absoluteMinThreshold: Float = 0.008     // Slightly higher minimum
     private let absoluteMaxThreshold: Float = 0.15      // Higher max for loud environments
     
-    // Timing parameters - optimized for conversational flow
-    private let silenceTimeout: TimeInterval = 0.8      // Faster end-of-speech detection
-    private let minSpeechDuration: TimeInterval = 0.15  // Shorter minimum speech
-    private let maxSpeechDuration: TimeInterval = 30.0  // Shorter max for conversation
-    private let autoCalibrationTime: TimeInterval = 0.5 // Faster auto calibration
-    private let manualCalibrationTime: TimeInterval = 2.0 // Shorter manual calibration
+    // Timing parameters - ULTRA-LOW LATENCY for real-time conversation
+    private let silenceTimeout: TimeInterval = 0.5      // 500ms silence = end of speech (was 800ms)
+    private let minSpeechDuration: TimeInterval = 0.1   // 100ms minimum speech (was 150ms)
+    private let maxSpeechDuration: TimeInterval = 20.0  // 20s max for conversation
+    private let autoCalibrationTime: TimeInterval = 0.3 // 300ms auto calibration (was 500ms)
+    private let manualCalibrationTime: TimeInterval = 1.5 // 1.5s manual calibration (was 2s)
     
     // State tracking
     private var lastSpeechTime: Date?
@@ -59,9 +59,9 @@ class AudioPipeline: ObservableObject {
     private var interruptionCooldown: Date?
     private let interruptionCooldownDuration: TimeInterval = 0.3  // Shorter cooldown
     
-    // Frame counting for robust detection - balanced for speed and accuracy
-    private let minSpeechFrames = 2    // Need 2 consecutive frames to start speech
-    private let minSilenceFrames = 6   // Need 6 consecutive frames of silence
+    // Frame counting for robust detection - OPTIMIZED for low latency
+    private let minSpeechFrames = 1    // Start speech immediately on first frame (was 2)
+    private let minSilenceFrames = 4   // Need 4 consecutive frames of silence (was 6)
     
     // Audio level history for smoothing
     private var levelHistory: [Float] = []
@@ -325,8 +325,8 @@ class AudioPipeline: ObservableObject {
         // Cancel any existing timer
         silenceCheckTimer?.invalidate()
         
-        // Start a repeating timer that checks for silence
-        silenceCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        // Start a repeating timer that checks for silence - 50ms for low latency (was 100ms)
+        silenceCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.checkForSilenceTimeout()
             }

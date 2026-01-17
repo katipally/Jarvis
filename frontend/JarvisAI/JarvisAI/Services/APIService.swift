@@ -58,6 +58,67 @@ actor APIService {
         
         return uploadResponse
     }
+    
+    func updateAISettings(
+        provider: String?, 
+        openaiModel: String?, 
+        ollamaModel: String?
+    ) async throws {
+        guard let url = URL(string: "\(Config.apiBaseURL)/settings/ai") else {
+            throw APIError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        var body: [String: Any] = [:]
+        if let provider = provider { body["ai_provider"] = provider }
+        if let openaiModel = openaiModel { body["openai_model"] = openaiModel }
+        if let ollamaModel = ollamaModel { body["ollama_model"] = ollamaModel }
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+    }
+    
+    func fetchAvailableModels() async throws -> ModelsResponse {
+        guard let url = URL(string: "\(Config.apiBaseURL)/models") else {
+            throw APIError.invalidURL
+        }
+        
+        let (data, response) = try await URLSession.shared.data(from: url)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+        
+        let decoder = JSONDecoder()
+        return try decoder.decode(ModelsResponse.self, from: data)
+    }
+}
+
+struct ModelsResponse: Codable {
+    let openai: [ModelInfo]
+    let ollama: [ModelInfo]
+}
+
+struct ModelInfo: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let provider: String
+    let canReason: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case id, name, provider
+        case canReason = "can_reason"
+    }
 }
 
 struct FileUploadResponse: Codable {
