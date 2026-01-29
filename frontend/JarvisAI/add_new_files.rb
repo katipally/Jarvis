@@ -15,17 +15,30 @@ new_files = [
   'Views/MainContentView.swift',
   'Views/SidebarView.swift',
   'Views/SettingsView.swift',
-  'Views/FileAttachmentView.swift'
+  'Views/FileAttachmentView.swift',
+  'Services/RayMode/AppSearchManager.swift',
+  'Services/RayMode/RayModeViewModel.swift',
+  'Views/RayModeView.swift'
 ]
 
 new_files.each do |file_path|
   parts = file_path.split('/')
-  folder = parts[0]
-  filename = parts[1]
   
-  folder_group = main_group[folder] || main_group.new_group(folder, folder)
+  # Navigate/create nested groups
+  current_group = main_group
+  parts[0..-2].each do |folder|
+    current_group = current_group[folder] || current_group.new_group(folder, folder)
+  end
   
-  file_ref = folder_group.new_file("JarvisAI/#{file_path}")
+  # Check if file already exists in group
+  filename = parts.last
+  existing = current_group.files.find { |f| f.path&.end_with?(filename) }
+  if existing
+    puts "Skipped (exists): #{file_path}"
+    next
+  end
+  
+  file_ref = current_group.new_file("JarvisAI/#{file_path}")
   target.add_file_references([file_ref])
   
   puts "Added: #{file_path}"

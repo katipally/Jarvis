@@ -220,7 +220,7 @@ class ConversationViewModel: ObservableObject {
                     self.state = .idle
                     if self.inputMode == .handsFree && self.isActive {
                         Task {
-                            try? await Task.sleep(for: .milliseconds(50))
+                            try? await Task.sleep(for: .milliseconds(200))
                             // CRITICAL: Check isActive again to prevent race condition on exit
                             if self.state == .idle && self.isActive {
                                 try? await self.audioPipeline.startRecording()
@@ -262,10 +262,10 @@ class ConversationViewModel: ObservableObject {
                     self.assistantResponse = ""
                 }
                 
-                // Resume listening in hands-free mode after minimal delay
-                // Reduced from 300ms to 100ms for faster response
+                // Resume listening in hands-free mode after a brief delay
+                // The delay allows TTS audio to fully stop before resuming microphone
                 if self.inputMode == .handsFree && self.isActive && self.state == .idle {
-                    try? await Task.sleep(for: .milliseconds(100))
+                    try? await Task.sleep(for: .milliseconds(300))
                     if self.state == .idle && self.isActive {
                         try? await self.audioPipeline.startRecording()
                     }
@@ -422,10 +422,10 @@ class ConversationViewModel: ObservableObject {
         // If still listening with no transcript, go back to idle
         if state == .listening && currentTranscript.isEmpty && partialTranscript.isEmpty {
             state = .idle
-            // Restart listening in hands-free mode - minimal delay
+            // Restart listening in hands-free mode
             if inputMode == .handsFree && isActive {
                 Task {
-                    try? await Task.sleep(for: .milliseconds(50))
+                    try? await Task.sleep(for: .milliseconds(300))
                     // CRITICAL: Check isActive again to prevent race condition on exit
                     if state == .idle && isActive {
                         try? await audioPipeline.startRecording()
@@ -464,10 +464,10 @@ class ConversationViewModel: ObservableObject {
             await sendInterrupt()
         }
         
-        // Resume listening in hands-free mode - minimal delay
+        // Resume listening in hands-free mode
         if inputMode == .handsFree && isActive {
             Task {
-                try? await Task.sleep(for: .milliseconds(50))
+                try? await Task.sleep(for: .milliseconds(200))
                 // CRITICAL: Check isActive again to prevent race condition on exit
                 if state == .idle && isActive {
                     try? await audioPipeline.startRecording()
@@ -582,18 +582,11 @@ Be natural, brief, and helpful. Sound like a real person, not a robot or butler.
                 assistantResponse += content
             }
             
-        case "tts_chunk":
-            // New ultra-low latency chunk-based TTS
-            if let chunk = json["chunk"] as? String {
-                state = .speaking
-                speechSynthesis.speakChunk(chunk)
-            }
-            
         case "sentence_end":
-            // Legacy support - treat as chunk
             if let sentence = json["sentence"] as? String {
+                // Speak sentence immediately for low latency
                 state = .speaking
-                speechSynthesis.speakChunk(sentence)
+                speechSynthesis.speakStreaming(sentence)
             }
             
         case "text_done":
@@ -761,9 +754,9 @@ Be natural, brief, and helpful. Sound like a real person, not a robot or butler.
         // Reset speech recognition for new input
         speechRecognition.stopRecognition()
         
-        // Minimal delay then start listening immediately
+        // Small delay to let audio settle, then start listening
         Task {
-            try? await Task.sleep(for: .milliseconds(30))
+            try? await Task.sleep(for: .milliseconds(100))
             if state == .interrupted {
                 startListening()
             }

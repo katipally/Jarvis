@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from api.routes import chat, files, health, conversations, conversation, settings as settings_route, models
+from api.routes import chat, files, health, conversations, conversation
 from core.config import settings
 from core.logger import setup_logger
 from pathlib import Path
@@ -46,8 +46,6 @@ app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(files.router, prefix="/api", tags=["files"])
 app.include_router(conversations.router, tags=["conversations"])
 app.include_router(conversation.router, prefix="/api", tags=["conversation"])
-app.include_router(settings_route.router, prefix="/api", tags=["settings"])
-app.include_router(models.router, prefix="/api", tags=["models"])
 
 
 @app.get("/")

@@ -152,7 +152,7 @@ async def conversation_websocket(websocket: WebSocket):
 
 
 async def stream_agent_response(websocket: WebSocket, session: ConversationSession, user_input: str):
-    """Stream response from LangGraph agent with ultra-low latency chunk-based TTS."""
+    """Stream response from LangGraph agent."""
     try:
         logger.info(f"Streaming agent response for: {user_input[:50]}...")
         await websocket.send_json({"type": "text_start"})
@@ -165,75 +165,54 @@ async def stream_agent_response(websocket: WebSocket, session: ConversationSessi
         }
         
         full_response = ""
-        chunk_buffer = ""
-        word_count = 0
-        last_chunk_time = asyncio.get_event_loop().time()
+        sentence_buffer = ""
         
-        # Ultra-low latency config: send TTS chunks more frequently
-        MIN_WORDS_FOR_CHUNK = 3      # Send after 3 words minimum
-        MAX_CHUNK_DELAY_MS = 150     # Or after 150ms of buffering
-        PUNCTUATION_TRIGGERS = {'.', '?', '!', ',', ';', ':', '-', '—'}
-        
-        async def flush_chunk(force: bool = False):
-            """Send chunk to TTS if ready."""
-            nonlocal chunk_buffer, word_count, last_chunk_time
+        # Stream events from the graph
+        async for event in agent_graph.astream_events(inputs, version="v1"):
+            kind = event["event"]
             
-            trimmed = chunk_buffer.strip()
-            if not trimmed:
-                return
-                
-            current_time = asyncio.get_event_loop().time()
-            time_elapsed_ms = (current_time - last_chunk_time) * 1000
-            
-            # Send chunk if: enough words, timeout reached, or forced
-            should_send = (
-                force or
-                word_count >= MIN_WORDS_FOR_CHUNK or
-                time_elapsed_ms >= MAX_CHUNK_DELAY_MS or
-                any(trimmed.endswith(p) for p in PUNCTUATION_TRIGGERS)
-            )
-            
-            if should_send and len(trimmed) > 1:
-                await websocket.send_json({
-                    "type": "tts_chunk",
-                    "chunk": trimmed
-                })
-                chunk_buffer = ""
-                word_count = 0
-                last_chunk_time = current_time
-                # Minimal yield for interrupts
-                await asyncio.sleep(0.001)
-        
-        # Stream message chunks (tokens) directly from the LLM
-        async for msg, metadata in agent_graph.astream(inputs, stream_mode="messages"):
-            # msg is an AIMessageChunk
-            if hasattr(msg, "content") and msg.content:
-                content = msg.content
-                if isinstance(content, str):
+            # 1. Handle Chat Model Streaming (Tokens)
+            if kind == "on_chat_model_stream":
+                content = event["data"]["chunk"].content
+                if content and isinstance(content, str):
                     full_response += content
-                    chunk_buffer += content
+                    sentence_buffer += content
                     
-                    # Count words added
-                    if ' ' in content or content in PUNCTUATION_TRIGGERS:
-                        word_count += content.count(' ')
-                    
-                    # Send text delta for display
+                    # Send chunks
                     await websocket.send_json({
                         "type": "text_delta",
                         "content": content
                     })
                     
-                    # Check if we should flush TTS chunk
-                    await flush_chunk()
+                    # Sentence detection for TTS pacing
+                    if any(sentence_buffer.rstrip().endswith(p) for p in ['.', '?', '!', ';"']):
+                        await websocket.send_json({
+                            "type": "sentence_end",
+                            "sentence": sentence_buffer.strip()
+                        })
+                        sentence_buffer = ""
+                        # Yield to event loop to allow interrupts
+                        await asyncio.sleep(0.01)
+
+            # 2. Handle Tool execution start (UI Feedback)
+            elif kind == "on_tool_start":
+                tool_name = event["name"]
+                logger.info(f"Agent using tool: {tool_name}")
+                await websocket.send_json({
+                    "type": "tool_start",
+                    "tool": tool_name
+                })
             
-            # Handle Tool Calls
-            if hasattr(msg, "tool_calls") and msg.tool_calls:
-                for tool_call in msg.tool_calls:
-                    tool_name = tool_call.get('name', 'unknown')
-                    logger.info(f"Agent generating tool call: {tool_name}")
+            # 3. Handle Tool output
+            elif kind == "on_tool_end":
+                logger.info(f"Tool {event['name']} finished")
 
         # Flush remaining buffer
-        await flush_chunk(force=True)
+        if sentence_buffer.strip():
+            await websocket.send_json({
+                "type": "sentence_end",
+                "sentence": sentence_buffer.strip()
+            })
             
         # Update session history
         if full_response:
@@ -245,6 +224,7 @@ async def stream_agent_response(websocket: WebSocket, session: ConversationSessi
                 "full_text": full_response
             })
         else:
+            # Fallback if no response generated (rare)
             await websocket.send_json({
                 "type": "text_done",
                 "full_text": "I'm listening."

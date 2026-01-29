@@ -34,6 +34,11 @@ struct JarvisAIApp: App {
                 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 
+                Button("Open Ray Mode") {
+                    AppDelegate.shared?.openRayMode()
+                }
+                .keyboardShortcut(.space, modifiers: [.option])
+                
                 Button("Open Chat Window") {
                     AppDelegate.shared?.openMainWindow()
                 }
@@ -104,12 +109,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     static var shared: AppDelegate?
     var statusItem: NSStatusItem?
     var focusPanel: NSPanel?
+    var rayPanel: NSPanel?
     var eventMonitor: Any?
+    var rayClickMonitor: Any?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
         setupMenuBar()
         setupFocusPanel()
+        setupRayPanel()
         setupNotifications()
         initializeMacControlServices()
     }
@@ -133,6 +141,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 },
                 onVoiceCommand: {
                     NotificationCenter.default.post(name: NSNotification.Name("PushToTalk"), object: nil)
+                },
+                onRayMode: { [weak self] in
+                    self?.openRayMode()
                 }
             )
         }
@@ -198,6 +209,128 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         positionPanelNearMenuBar(panel)
         
         self.focusPanel = panel
+    }
+    
+    // MARK: - Ray Panel Setup (Spotlight-style, stable like Focus Mode)
+    private func setupRayPanel() {
+        // Create a Spotlight-style centered panel using custom class for keyboard input
+        let panelWidth: CGFloat = 680
+        let panelHeight: CGFloat = 480
+        
+        let panel = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        
+        // Configure as stable top-level panel (like Focus Mode)
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.becomesKeyOnlyIfNeeded = false
+        panel.isMovableByWindowBackground = true
+        panel.appearance = NSAppearance(named: .vibrantDark)
+        
+        // Add SwiftUI content
+        let hostingController = NSHostingController(rootView: RayPanelView(onDismiss: { [weak self] in
+            self?.closeRayPanel()
+        }))
+        hostingController.view.layer?.cornerRadius = 16
+        hostingController.view.layer?.masksToBounds = true
+        hostingController.view.wantsLayer = true
+        panel.contentViewController = hostingController
+        
+        // Center on screen
+        positionRayPanelCenter(panel)
+        
+        self.rayPanel = panel
+    }
+    
+    private func positionRayPanelCenter(_ panel: NSPanel) {
+        guard let screen = NSScreen.main else { return }
+        
+        let screenFrame = screen.frame
+        let panelFrame = panel.frame
+        
+        // Position in upper-center of screen (like Spotlight)
+        let x = (screenFrame.width - panelFrame.width) / 2
+        let y = screenFrame.height * 0.65 - panelFrame.height / 2
+        
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+    
+    @objc func toggleRayPanel() {
+        guard let panel = rayPanel else { return }
+        
+        if panel.isVisible {
+            closeRayPanel()
+        } else {
+            openRayPanel()
+        }
+    }
+    
+    private func openRayPanel() {
+        guard let panel = rayPanel else { return }
+        
+        // Prevent double-open
+        guard !panel.isVisible else {
+            panel.makeKey()
+            return
+        }
+        
+        // Close focus panel if open (clean state transition)
+        if focusPanel?.isVisible == true {
+            focusPanel?.orderOut(nil)
+        }
+        
+        // Hide main window (like Focus mode does)
+        for window in NSApp.windows {
+            if window.isVisible && window.canBecomeMain && isMainChatWindow(window) {
+                mainWindowRef = window
+                window.orderOut(nil)
+            }
+        }
+        
+        // Activate app to receive keyboard input
+        NSApp.activate(ignoringOtherApps: true)
+        
+        // Position and show
+        positionRayPanelCenter(panel)
+        panel.orderFrontRegardless()
+        panel.makeKey()
+        
+        // Focus the content view for keyboard input
+        DispatchQueue.main.async {
+            panel.makeFirstResponder(panel.contentView)
+        }
+        
+        // Notify view to focus search field and reset state
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            NotificationCenter.default.post(name: NSNotification.Name("RayPanelOpened"), object: nil)
+        }
+    }
+    
+    func closeRayPanel() {
+        guard rayPanel?.isVisible == true else { return }
+        
+        // Notify view to clear state first
+        NotificationCenter.default.post(name: NSNotification.Name("RayPanelClosed"), object: nil)
+        
+        // Close panel
+        rayPanel?.orderOut(nil)
+        
+        // Restore main window
+        DispatchQueue.main.async { [weak self] in
+            if let mainWindow = self?.mainWindowRef {
+                mainWindow.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
     }
     
     private func positionPanelNearMenuBar(_ panel: NSPanel) {
@@ -274,6 +407,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func openFocusPanel() {
         guard let panel = focusPanel else { return }
         
+        // Close Ray panel if open (clean mode transition)
+        if rayPanel?.isVisible == true {
+            rayPanel?.orderOut(nil)
+            NotificationCenter.default.post(name: NSNotification.Name("RayPanelClosed"), object: nil)
+        }
+        
         // Find and store reference to main chat window, then hide it completely
         for window in NSApp.windows {
             if window.isVisible && window.canBecomeMain && isMainChatWindow(window) {
@@ -282,6 +421,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 window.orderOut(nil)
             }
         }
+        
+        // Activate app
+        NSApp.activate(ignoringOtherApps: true)
         
         // Position and show the floating panel
         positionPanelNearMenuBar(panel)
@@ -311,9 +453,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    func openRayMode() {
+        // Toggle the standalone Ray panel
+        toggleRayPanel()
+    }
+    
     func openMainWindow() {
         // Close focus panel first
         closeFocusPanel()
+        
+        // Close ray panel if open
+        if rayPanel?.isVisible == true {
+            rayPanel?.orderOut(nil)
+            NotificationCenter.default.post(name: NSNotification.Name("RayPanelClosed"), object: nil)
+        }
         
         // Activate app
         NSApp.activate(ignoringOtherApps: true)
@@ -350,10 +503,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    /// Check if window is the main chat window (not focus panel, settings, or menu bar item)
+    /// Check if window is the main chat window (not focus panel, ray panel, settings, or menu bar item)
     private func isMainChatWindow(_ window: NSWindow) -> Bool {
         // Exclude focus panel
         if window == focusPanel {
+            return false
+        }
+        
+        // Exclude ray panel
+        if window == rayPanel {
             return false
         }
         
@@ -378,6 +536,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let eventMonitor = eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
         }
+        if let monitor = rayClickMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+    }
+}
+
+// MARK: - Custom Panel that accepts keyboard input
+class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+    
+    override func keyDown(with event: NSEvent) {
+        // Handle Escape to close
+        if event.keyCode == 53 {
+            AppDelegate.shared?.closeRayPanel()
+            return
+        }
+        super.keyDown(with: event)
     }
 }
 

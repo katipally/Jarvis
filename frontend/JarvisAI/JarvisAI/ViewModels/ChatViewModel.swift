@@ -28,13 +28,6 @@ class ChatViewModel: ObservableObject {
     @Published var currentConversationId: String?
     @Published var searchText: String = ""
     
-    // Available Models
-    @Published var availableModels: ModelsResponse?
-    @Published var openaiFastModel: String = "gpt-5-nano"
-    @Published var openaiReasoningModel: String = "o3-mini"
-    @Published var ollamaFastModel: String = "qwen3:8b"
-    @Published var ollamaReasoningModel: String = "deepseek-r1:distill"
-    
     // Token and cost tracking
     @Published var currentTokenCount: Int = 0
     @Published var sessionCost: Double = 0.0
@@ -536,39 +529,5 @@ class ChatViewModel: ObservableObject {
     func resetSessionStats() {
         totalTokensUsed = 0
         sessionCost = 0.0
-    }
-    
-    // MARK: - Settings
-    
-    func fetchModels() {
-        Task {
-            do {
-                let models = try await APIService.shared.fetchAvailableModels()
-                await MainActor.run {
-                    self.availableModels = models
-                }
-            } catch {
-                print("[ChatViewModel] Failed to fetch models: \(error)")
-            }
-        }
-    }
-    
-    func updateAISettings(
-        provider: String, 
-        openaiModel: String, 
-        ollamaModel: String
-    ) {
-        Task {
-            do {
-                try await APIService.shared.updateAISettings(
-                    provider: provider,
-                    openaiModel: openaiModel,
-                    ollamaModel: ollamaModel
-                )
-                print("[ChatViewModel] Updated AI Settings")
-            } catch {
-                print("[ChatViewModel] Failed to update AI settings: \(error)")
-            }
-        }
     }
 }

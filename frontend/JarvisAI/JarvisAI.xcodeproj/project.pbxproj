@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		12174D665D8C0934C9C89B2F /* RayModeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECF2A12DB55BCB22895CDA7B /* RayModeViewModel.swift */; };
+		35BE2C87AB90254BBE37F88A /* RayPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E66E820AC889AD85507F270 /* RayPanelView.swift */; };
+		A757F78E0EE01836E8517DAF /* RayModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A9309283794B3CF514BD50D /* RayModeView.swift */; };
 		AA0001 /* JarvisAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0002 /* JarvisAIApp.swift */; };
 		AA0003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0004 /* ContentView.swift */; };
 		AA0005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0006 /* Assets.xcassets */; };
@@ -50,9 +53,23 @@
 		AA0081 /* SystemNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0082 /* SystemNotificationService.swift */; };
 		AA0083 /* GlobalHotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0084 /* GlobalHotkeyService.swift */; };
 		AA0085 /* SettingsWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0086 /* SettingsWindowView.swift */; };
+		DB2CBE182C9CB24447BA8D76 /* AppSearchManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87616BAE84AEC6E0E583BC38 /* AppSearchManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		126B19C0205E107E7D7DD95A /* MainContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MainContentView.swift; path = JarvisAI/Views/MainContentView.swift; sourceTree = "<group>"; };
+		402573B8B47985AC06AC1F9A /* RayModeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RayModeView.swift; path = JarvisAI/Views/RayModeView.swift; sourceTree = "<group>"; };
+		4B835BDB487FEE59556E4E08 /* Conversation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Conversation.swift; path = JarvisAI/Models/Conversation.swift; sourceTree = "<group>"; };
+		4CE132C18C52368A2036EC47 /* AppSearchManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppSearchManager.swift; path = JarvisAI/Services/RayMode/AppSearchManager.swift; sourceTree = "<group>"; };
+		5EBF3032088C583C632DD20E /* SettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsView.swift; path = JarvisAI/Views/SettingsView.swift; sourceTree = "<group>"; };
+		6012CA6931B40EA48C480C1D /* ConversationService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ConversationService.swift; path = JarvisAI/Services/ConversationService.swift; sourceTree = "<group>"; };
+		634FBB1CDD7B355FA2653EA1 /* FileAttachmentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FileAttachmentView.swift; path = JarvisAI/Views/FileAttachmentView.swift; sourceTree = "<group>"; };
+		6A6B8C6FF3A46C01BE3A0479 /* SidebarView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SidebarView.swift; path = JarvisAI/Views/SidebarView.swift; sourceTree = "<group>"; };
+		774DABC0C575F0AC2AE77116 /* RayModeViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RayModeViewModel.swift; path = JarvisAI/Services/RayMode/RayModeViewModel.swift; sourceTree = "<group>"; };
+		7A9309283794B3CF514BD50D /* RayModeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RayModeView.swift; sourceTree = "<group>"; };
+		87616BAE84AEC6E0E583BC38 /* AppSearchManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppSearchManager.swift; sourceTree = "<group>"; };
+		8E66E820AC889AD85507F270 /* RayPanelView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RayPanelView.swift; sourceTree = "<group>"; };
+		A069FB081ABFD9E245C73CD5 /* ConversationViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ConversationViewModel.swift; path = JarvisAI/ViewModels/ConversationViewModel.swift; sourceTree = "<group>"; };
 		AA0002 /* JarvisAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAIApp.swift; sourceTree = "<group>"; };
 		AA0004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		AA0006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -96,6 +113,7 @@
 		AA0084 /* GlobalHotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyService.swift; sourceTree = "<group>"; };
 		AA0086 /* SettingsWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowView.swift; sourceTree = "<group>"; };
 		AAPP01 /* JarvisAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JarvisAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		ECF2A12DB55BCB22895CDA7B /* RayModeViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RayModeViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -110,6 +128,40 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		5F29DFB1E29BE077BF42C88A /* RayMode */ = {
+			isa = PBXGroup;
+			children = (
+				4CE132C18C52368A2036EC47 /* AppSearchManager.swift */,
+				774DABC0C575F0AC2AE77116 /* RayModeViewModel.swift */,
+				87616BAE84AEC6E0E583BC38 /* AppSearchManager.swift */,
+				ECF2A12DB55BCB22895CDA7B /* RayModeViewModel.swift */,
+			);
+			name = RayMode;
+			path = RayMode;
+			sourceTree = "<group>";
+		};
+		AAINTENT /* AppIntents */ = {
+			isa = PBXGroup;
+			children = (
+				AA0070 /* JarvisAppIntents.swift */,
+				AA0072 /* JarvisIntentHandler.swift */,
+			);
+			path = AppIntents;
+			sourceTree = "<group>";
+		};
+		AAMACCTRL /* MacControl */ = {
+			isa = PBXGroup;
+			children = (
+				AA0074 /* AccessibilityService.swift */,
+				AA0076 /* InputSimulator.swift */,
+				AA0078 /* ShortcutsService.swift */,
+				AA0080 /* WorkspaceMonitor.swift */,
+				AA0082 /* SystemNotificationService.swift */,
+				AA0084 /* GlobalHotkeyService.swift */,
+			);
+			path = MacControl;
+			sourceTree = "<group>";
+		};
 		AAMAIN /* JarvisAI */ = {
 			isa = PBXGroup;
 			children = (
@@ -126,20 +178,12 @@
 			path = JarvisAI;
 			sourceTree = "<group>";
 		};
-		AAINTENT /* AppIntents */ = {
-			isa = PBXGroup;
-			children = (
-				AA0070 /* JarvisAppIntents.swift */,
-				AA0072 /* JarvisIntentHandler.swift */,
-			);
-			path = AppIntents;
-			sourceTree = "<group>";
-		};
 		AAMODL /* Models */ = {
 			isa = PBXGroup;
 			children = (
 				AA0014 /* Message.swift */,
 				AA0030 /* Conversation.swift */,
+				4B835BDB487FEE59556E4E08 /* Conversation.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -170,21 +214,10 @@
 				AA0058 /* SpeechRecognitionService.swift */,
 				AA0060 /* SpeechSynthesisService.swift */,
 				AAMACCTRL /* MacControl */,
+				6012CA6931B40EA48C480C1D /* ConversationService.swift */,
+				5F29DFB1E29BE077BF42C88A /* RayMode */,
 			);
 			path = Services;
-			sourceTree = "<group>";
-		};
-		AAMACCTRL /* MacControl */ = {
-			isa = PBXGroup;
-			children = (
-				AA0074 /* AccessibilityService.swift */,
-				AA0076 /* InputSimulator.swift */,
-				AA0078 /* ShortcutsService.swift */,
-				AA0080 /* WorkspaceMonitor.swift */,
-				AA0082 /* SystemNotificationService.swift */,
-				AA0084 /* GlobalHotkeyService.swift */,
-			);
-			path = MacControl;
 			sourceTree = "<group>";
 		};
 		AAUTIL /* Utils */ = {
@@ -218,6 +251,13 @@
 				AA0066 /* ConversationModeView.swift */,
 				AA0068 /* UnifiedPanelView.swift */,
 				AA0086 /* SettingsWindowView.swift */,
+				126B19C0205E107E7D7DD95A /* MainContentView.swift */,
+				6A6B8C6FF3A46C01BE3A0479 /* SidebarView.swift */,
+				5EBF3032088C583C632DD20E /* SettingsView.swift */,
+				634FBB1CDD7B355FA2653EA1 /* FileAttachmentView.swift */,
+				402573B8B47985AC06AC1F9A /* RayModeView.swift */,
+				7A9309283794B3CF514BD50D /* RayModeView.swift */,
+				8E66E820AC889AD85507F270 /* RayPanelView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -227,6 +267,7 @@
 			children = (
 				AA0016 /* ChatViewModel.swift */,
 				AA0062 /* ConversationViewModel.swift */,
+				A069FB081ABFD9E245C73CD5 /* ConversationViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -342,6 +383,10 @@
 				AA0081 /* SystemNotificationService.swift in Sources */,
 				AA0083 /* GlobalHotkeyService.swift in Sources */,
 				AA0085 /* SettingsWindowView.swift in Sources */,
+				DB2CBE182C9CB24447BA8D76 /* AppSearchManager.swift in Sources */,
+				12174D665D8C0934C9C89B2F /* RayModeViewModel.swift in Sources */,
+				A757F78E0EE01836E8517DAF /* RayModeView.swift in Sources */,
+				35BE2C87AB90254BBE37F88A /* RayPanelView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

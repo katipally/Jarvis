@@ -2,26 +2,33 @@ from typing import Literal
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 from langchain_openai import ChatOpenAI
-from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from .state import AgentState
 from .tools import get_tools
 from core.config import settings
-from core.preferences import preferences_manager
 from core.logger import setup_logger
 
 logger = setup_logger(__name__)
 
 # Configuration for agent behavior limits
 AGENT_CONFIG = {
-    "max_tool_calls": 25,
-    "max_consecutive_errors": 3,
-    "recursion_limit": 100,
+    "max_tool_calls": 25,  # Maximum tool calls per request (increased for complex multi-step tasks)
+    "max_consecutive_errors": 3,  # Stop after this many consecutive errors
+    "recursion_limit": 100,  # LangGraph recursion limit (increased for complex workflows)
 }
 
 
 def create_agent_graph():
     """Create the LangGraph agent workflow with proper guardrails."""
+    
+    llm = ChatOpenAI(
+        model=settings.OPENAI_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+        streaming=True
+    )
+    
+    tools = get_tools()
+    llm_with_tools = llm.bind_tools(tools)
     
     def count_tool_calls(state: AgentState) -> int:
         """Count total tool calls in the conversation."""
@@ -71,32 +78,6 @@ def create_agent_graph():
     
     async def call_model(state: AgentState):
         """Call the LLM with current state and guardrails."""
-        # Dynamic LLM initialization based on current preferences
-        prefs = preferences_manager.get()
-        effective_model = prefs.current_model
-        
-        if prefs.ai_provider == "ollama":
-            logger.info(f"Using Ollama Agent: {effective_model}")
-            llm = ChatOllama(
-                model=effective_model,
-                temperature=0,
-                num_ctx=8192,       # Reduced context for faster processing (conversation doesn't need 128k)
-                num_predict=256,    # Limit max tokens for conversational responses (keeps it short)
-                num_batch=512,      # Larger batch size for faster prompt processing
-                num_thread=8,       # Use multiple CPU threads
-                repeat_penalty=1.1, # Slight penalty to avoid repetition
-            )
-        else:
-            logger.info(f"Using OpenAI Agent: {effective_model}")
-            llm = ChatOpenAI(
-                model=effective_model,
-                api_key=settings.OPENAI_API_KEY,
-                streaming=True
-            )
-        
-        tools = get_tools()
-        llm_with_tools = llm.bind_tools(tools)
-        
         messages = state["messages"]
         
         # Check for guardrail conditions and add context if needed
@@ -238,7 +219,7 @@ Be concise, professional, and direct."""
     workflow = StateGraph(AgentState)
     
     workflow.add_node("agent", call_model)
-    workflow.add_node("tools", ToolNode(get_tools()))
+    workflow.add_node("tools", ToolNode(tools))
     
     workflow.add_edge(START, "agent")
     workflow.add_conditional_edges(

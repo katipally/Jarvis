@@ -43,6 +43,16 @@ struct UnifiedPanelView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .animation(.spring(response: 0.3), value: currentMode)
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SwitchToFocusMode"))) { _ in
+            withAnimation {
+                currentMode = .focus
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SwitchToConversationMode"))) { _ in
+            withAnimation {
+                currentMode = .conversation
+            }
+        }
     }
     
     // MARK: - Drag Handle

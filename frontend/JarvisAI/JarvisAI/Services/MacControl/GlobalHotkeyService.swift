@@ -3,6 +3,34 @@ import AppKit
 import Carbon.HIToolbox
 import CoreGraphics
 
+// Global callback for Carbon hotkey events (must be outside class)
+private func hotkeyEventHandler(
+    nextHandler: EventHandlerCallRef?,
+    event: EventRef?,
+    userData: UnsafeMutableRawPointer?
+) -> OSStatus {
+    guard let event = event else { return OSStatus(eventNotHandledErr) }
+    
+    var hotkeyID = EventHotKeyID()
+    let status = GetEventParameter(
+        event,
+        EventParamName(kEventParamDirectObject),
+        EventParamType(typeEventHotKeyID),
+        nil,
+        MemoryLayout<EventHotKeyID>.size,
+        nil,
+        &hotkeyID
+    )
+    
+    if status == noErr {
+        Task { @MainActor in
+            GlobalHotkeyService.shared.handleHotkeyEvent(id: hotkeyID.id)
+        }
+    }
+    
+    return noErr
+}
+
 @MainActor
 class GlobalHotkeyService: ObservableObject {
     static let shared = GlobalHotkeyService()
@@ -18,8 +46,41 @@ class GlobalHotkeyService: ObservableObject {
     private var hotkeyRefs: [EventHotKeyRef] = []
     private var hotkeyHandlers: [UInt32: () -> Void] = [:]
     private var nextHotkeyID: UInt32 = 1
+    private var carbonEventHandler: EventHandlerRef?
     
-    private init() {}
+    private init() {
+        installCarbonEventHandler()
+    }
+    
+    // MARK: - Carbon Event Handler Installation
+    private func installCarbonEventHandler() {
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+        
+        let status = InstallEventHandler(
+            GetApplicationEventTarget(),
+            hotkeyEventHandler,
+            1,
+            &eventType,
+            nil,
+            &carbonEventHandler
+        )
+        
+        if status == noErr {
+            print("[GlobalHotkeyService] Carbon event handler installed")
+        } else {
+            print("[GlobalHotkeyService] Failed to install Carbon event handler: \(status)")
+        }
+    }
+    
+    func handleHotkeyEvent(id: UInt32) {
+        if let handler = hotkeyHandlers[id] {
+            print("[GlobalHotkeyService] Hotkey triggered: ID \(id)")
+            handler()
+        }
+    }
     
     // MARK: - Permission Check
     var hasAccessibilityPermission: Bool {
@@ -359,13 +420,15 @@ extension GlobalHotkeyService {
         static let quickCapture = (key: UInt32(kVK_ANSI_C), modifiers: UInt32(cmdKey | shiftKey | optionKey))
         static let voiceCommand = (key: UInt32(kVK_Space), modifiers: UInt32(cmdKey | optionKey))
         static let clipboardHistory = (key: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey))
+        static let rayMode = (key: UInt32(kVK_Space), modifiers: UInt32(optionKey))
     }
     
     func registerDefaultJarvisHotkeys(
         onActivate: @escaping () -> Void,
         onFocusMode: @escaping () -> Void,
         onQuickCapture: @escaping () -> Void,
-        onVoiceCommand: @escaping () -> Void
+        onVoiceCommand: @escaping () -> Void,
+        onRayMode: (() -> Void)? = nil
     ) {
         _ = registerHotkey(
             key: JarvisHotkeys.activateJarvis.key,
@@ -394,6 +457,15 @@ extension GlobalHotkeyService {
             name: "Voice Command",
             handler: onVoiceCommand
         )
+        
+        if let rayModeHandler = onRayMode {
+            _ = registerHotkey(
+                key: JarvisHotkeys.rayMode.key,
+                modifiers: JarvisHotkeys.rayMode.modifiers,
+                name: "Ray Mode",
+                handler: rayModeHandler
+            )
+        }
     }
 }
 
