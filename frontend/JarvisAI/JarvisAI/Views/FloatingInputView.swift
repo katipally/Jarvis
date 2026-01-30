@@ -9,6 +9,10 @@ struct FloatingInputBar: View {
     
     var body: some View {
         VStack(spacing: 8) {
+            // Mode selector: Reasoning vs Fast (v2.0)
+            ModeSelectorView(selectedMode: $viewModel.selectedMode)
+                .disabled(viewModel.isLoading)
+            
             // Attached files preview
             if !viewModel.attachedFiles.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {

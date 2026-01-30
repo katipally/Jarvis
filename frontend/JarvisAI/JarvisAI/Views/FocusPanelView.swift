@@ -301,6 +301,24 @@ struct FocusMessageRow: View {
             }
             
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
+                // Plan Stepper for assistant messages (Focus Mode support)
+                if message.role == .assistant {
+                    if message.hasPlan, let plan = message.plan, !plan.isEmpty {
+                        FocusPlanStepperView(
+                            steps: plan,
+                            summary: message.planSummary ?? ""
+                        )
+                        .frame(maxWidth: 300)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                        .id("focus-plan-\(message.id)-\(plan.map { $0.status.rawValue }.joined())")
+                    } else if message.isStreaming && message.content.isEmpty && (viewModel.detectedIntent == "action" || viewModel.detectedIntent == "mixed") {
+                        // Compact planning indicator for Focus mode
+                        FocusPlanningIndicator()
+                            .frame(maxWidth: 300)
+                            .transition(.opacity)
+                    }
+                }
+                
                 // File Attachments - larger, clickable previews
                 if !message.attachedFileNames.isEmpty {
                     VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
@@ -340,6 +358,11 @@ struct FocusMessageRow: View {
                         .fill(message.role == .user ? Color.blue : Color.white.opacity(0.12))
                 )
                 
+                // Reasoning steps (compact for Focus mode)
+                if message.role == .assistant && !message.reasoning.isEmpty && !message.isStreaming {
+                    FocusReasoningDropdown(reasoning: message.reasoning)
+                }
+                
                 // Actions on hover
                 if isHovering && !message.isStreaming {
                     HStack(spacing: 6) {
@@ -373,11 +396,331 @@ struct FocusMessageRow: View {
                 Spacer(minLength: 50)
             }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: message.plan?.count ?? 0)
     }
     
     private func copyToClipboard(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+// MARK: - Focus Plan Stepper View (Compact version for Focus mode with live updates)
+struct FocusPlanStepperView: View {
+    let steps: [PlanStep]
+    let summary: String
+    @State private var isExpanded: Bool = true
+    @State private var pulseAnimation: Bool = false
+    
+    var completedCount: Int {
+        steps.filter { $0.status == .completed }.count
+    }
+    
+    var runningCount: Int {
+        steps.filter { $0.status == .running }.count
+    }
+    
+    var isExecuting: Bool {
+        runningCount > 0 || (completedCount < steps.count && completedCount > 0)
+    }
+    
+    var currentStepIndex: Int {
+        steps.firstIndex(where: { $0.status == .running }) ?? 
+        steps.firstIndex(where: { $0.status == .pending }) ?? 
+        steps.count
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Header with live status
+            HStack(spacing: 8) {
+                // Animated icon
+                ZStack {
+                    Circle()
+                        .fill(isExecuting ? Color.purple.opacity(0.2) : Color.green.opacity(0.2))
+                        .frame(width: 24, height: 24)
+                    
+                    if isExecuting {
+                        Circle()
+                            .stroke(Color.purple.opacity(0.4), lineWidth: 1.5)
+                            .frame(width: 24, height: 24)
+                            .scaleEffect(pulseAnimation ? 1.3 : 1.0)
+                            .opacity(pulseAnimation ? 0 : 1)
+                    }
+                    
+                    Image(systemName: isExecuting ? "gearshape.fill" : "checkmark.circle.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(isExecuting ? .purple : .green)
+                        .rotationEffect(.degrees(isExecuting && pulseAnimation ? 20 : 0))
+                }
+                .onAppear {
+                    if isExecuting {
+                        withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                            pulseAnimation = true
+                        }
+                    }
+                }
+                .onChange(of: isExecuting) { executing in
+                    if executing {
+                        withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                            pulseAnimation = true
+                        }
+                    } else {
+                        pulseAnimation = false
+                    }
+                }
+                
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(summary.isEmpty ? "Plan" : summary)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                    
+                    if isExecuting {
+                        Text("Step \(currentStepIndex + 1)/\(steps.count)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.purple)
+                    }
+                }
+                
+                Spacer()
+                
+                // Progress + spinner
+                HStack(spacing: 4) {
+                    if isExecuting {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: 12, height: 12)
+                    }
+                    
+                    Text("\(completedCount)/\(steps.count)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(completedCount == steps.count ? Color.green.opacity(0.2) : Color.purple.opacity(0.2))
+                        )
+                        .foregroundColor(completedCount == steps.count ? .green : .purple)
+                }
+                
+                Button(action: {
+                    withAnimation(.spring(response: 0.3)) {
+                        isExpanded.toggle()
+                    }
+                }) {
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            // Progress bar with running indicator
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.15))
+                        .frame(height: 4)
+                    
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [.purple, .blue],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: geo.size.width * CGFloat(completedCount) / CGFloat(max(steps.count, 1)), height: 4)
+                    
+                    // Running indicator dot
+                    if isExecuting && currentStepIndex < steps.count {
+                        Circle()
+                            .fill(Color.purple)
+                            .frame(width: 6, height: 6)
+                            .shadow(color: .purple.opacity(0.5), radius: 2)
+                            .offset(x: geo.size.width * CGFloat(currentStepIndex) / CGFloat(max(steps.count, 1)) - 3)
+                    }
+                }
+            }
+            .frame(height: 4)
+            .animation(.spring(response: 0.4), value: completedCount)
+            .animation(.spring(response: 0.4), value: currentStepIndex)
+            
+            // Steps list (expanded)
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(steps) { step in
+                        FocusPlanStepRow(step: step)
+                    }
+                }
+                .padding(.top, 4)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(isExecuting ? Color.purple.opacity(0.3) : Color.white.opacity(0.1), lineWidth: isExecuting ? 1 : 0.5)
+                )
+        )
+        .animation(.easeInOut(duration: 0.3), value: isExecuting)
+    }
+}
+
+// MARK: - Focus Plan Step Row
+struct FocusPlanStepRow: View {
+    let step: PlanStep
+    
+    var statusIcon: String {
+        switch step.status {
+        case .pending: return "circle"
+        case .running: return "circle.dotted"
+        case .completed: return "checkmark.circle.fill"
+        case .failed: return "xmark.circle.fill"
+        case .skipped: return "minus.circle"
+        }
+    }
+    
+    var statusColor: Color {
+        switch step.status {
+        case .pending: return .gray
+        case .running: return .purple
+        case .completed: return .green
+        case .failed: return .red
+        case .skipped: return .gray
+        }
+    }
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: statusIcon)
+                .font(.system(size: 10))
+                .foregroundStyle(statusColor)
+                .frame(width: 14)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.description)
+                    .font(.system(size: 11))
+                    .foregroundStyle(step.status == .completed ? .secondary : .primary)
+                    .lineLimit(2)
+                
+                if let toolName = step.toolName, step.status == .running {
+                    HStack(spacing: 3) {
+                        Image(systemName: "wrench.fill")
+                            .font(.system(size: 8))
+                        Text(toolName)
+                            .font(.system(size: 9))
+                    }
+                    .foregroundStyle(.purple.opacity(0.8))
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: step.status)
+    }
+}
+
+// MARK: - Focus Reasoning Dropdown (Compact)
+struct FocusReasoningDropdown: View {
+    let reasoning: [String]
+    @State private var isExpanded: Bool = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button(action: {
+                withAnimation(.spring(response: 0.3)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "brain")
+                        .font(.system(size: 9))
+                    Text("Thinking Steps")
+                        .font(.system(size: 10, weight: .medium))
+                    Text("• \(reasoning.count)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9))
+                }
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(reasoning.enumerated()), id: \.offset) { index, step in
+                        Text("• \(step)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(.leading, 12)
+                .transition(.opacity)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.white.opacity(0.05))
+        )
+    }
+}
+
+// MARK: - Focus Planning Indicator (Compact version)
+struct FocusPlanningIndicator: View {
+    @State private var dotAnimation: Bool = false
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            // Animated icon
+            ZStack {
+                Circle()
+                    .fill(Color.purple.opacity(0.15))
+                    .frame(width: 24, height: 24)
+                
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.purple)
+            }
+            
+            HStack(spacing: 3) {
+                Text("Planning")
+                    .font(.system(size: 11, weight: .medium))
+                
+                // Animated dots
+                HStack(spacing: 2) {
+                    ForEach(0..<3, id: \.self) { index in
+                        Circle()
+                            .fill(Color.purple)
+                            .frame(width: 3, height: 3)
+                            .opacity(dotAnimation ? 1.0 : 0.3)
+                            .animation(
+                                .easeInOut(duration: 0.4)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(index) * 0.12),
+                                value: dotAnimation
+                            )
+                    }
+                }
+                .onAppear { dotAnimation = true }
+            }
+            
+            Spacer()
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.purple.opacity(0.2), lineWidth: 0.5)
+                )
+        )
     }
 }
 

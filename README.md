@@ -2,7 +2,7 @@
 
 **The Ultimate macOS AI Assistant** — Combining the best of ChatGPT, Siri, Claude, Cursor & Cluely
 
-✅ Voice Conversation | ✅ Screen Understanding | ✅ Mac Control | ✅ Accessibility APIs | ✅ Local LLM Support | ✅ Native macOS UI
+✅ Voice Conversation | ✅ Screen Understanding | ✅ Mac Control | ✅ Memory System | ✅ Planning | ✅ Native macOS UI
 
 ---
 
@@ -11,11 +11,19 @@
 ![macOS](https://img.shields.io/badge/macOS-13.0+-black.svg)
 ![Scripts](https://img.shields.io/badge/AppleScripts-100+-purple.svg)
 ![Tools](https://img.shields.io/badge/AI_Tools-43-red.svg)
+![LangGraph](https://img.shields.io/badge/LangGraph-Agent-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 ## 🚀 Overview
 
-Jarvis is a cutting-edge AI assistant that combines voice conversation, computer vision, screen understanding, and deep Mac automation capabilities. Built with Swift 6/SwiftUI for the frontend and FastAPI/LangGraph for the backend, Jarvis offers a truly multimodal experience with support for local LLMs via Ollama.
+Jarvis is a cutting-edge AI assistant that combines voice conversation, computer vision, screen understanding, and deep Mac automation capabilities. Built with Swift 6/SwiftUI for the frontend and FastAPI/LangGraph for the backend.
+
+### New in v2.0
+- 🧠 **Dual Modes**: Reasoning (detailed planning) or Fast (quick responses)
+- 📋 **Step-by-Step Planning**: Visual plan display with real-time status updates
+- 🗄️ **Memory System**: Knowledge graph + vector search for context retention
+- 🎙️ **Voice Pipeline**: Pipecat-inspired real-time voice with interruption handling
+- 🎨 **Liquid Glass UI**: Modern iOS/macOS 26 design language
 
 **What makes Jarvis unique:**
 - 🖥️ **Deep macOS Integration** — 100+ AppleScripts + 43 AI Tools + Accessibility APIs

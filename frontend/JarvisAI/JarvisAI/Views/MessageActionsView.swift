@@ -138,41 +138,4 @@ struct ErrorRecoveryView: View {
     }
 }
 
-struct ReasoningSection: View {
-    let reasoning: [String]
-    @State private var isExpanded = false
-    
-    var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(reasoning.indices, id: \.self) { index in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("\(index + 1)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 16, height: 16)
-                            .background(.blue.opacity(0.6), in: Circle())
-                        
-                        Text(reasoning[index])
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(.top, 8)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "brain")
-                    .font(.system(size: 10))
-                Text("Thinking Steps")
-                    .font(.system(size: 11, weight: .medium))
-                Text("·")
-                Text("\(reasoning.count)")
-                    .font(.system(size: 11, design: .monospaced))
-            }
-            .foregroundStyle(.tertiary)
-        }
-        .tint(.secondary)
-        .padding(.top, 4)
-    }
-}
+// ReasoningSection has been moved to MessageBubbleView.swift

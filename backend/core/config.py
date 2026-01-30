@@ -10,8 +10,10 @@ class Settings(BaseSettings):
         extra="ignore"
     )
     
+    # OpenAI Configuration
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-5-nano"
+    OPENAI_MODEL: str = "gpt-4o"  # Primary reasoning model
+    OPENAI_FAST_MODEL: str = "gpt-4o-mini"  # Fast mode model
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     CHROMA_DB_PATH: str = "./chroma_db"
     ENVIRONMENT: str = "development"

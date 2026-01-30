@@ -3,17 +3,23 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 python-multipart>=0.0.18
 sse-starlette>=2.1.0
+websockets>=12.0
 
-# LLM & Orchestration - Using compatible versions
-langgraph>=1.0.0
-langchain>=0.3.0
-langchain-openai>=0.2.0
+# LLM & Orchestration
+langgraph>=1.0.7
+langchain>=1.2.7
+langchain-core>=1.2.7
+langchain-openai>=1.1.7
 langchain-community>=0.3.0
 openai>=1.50.0
 
 # RAG & Embeddings
 chromadb>=0.5.0
 sentence-transformers>=3.0.0
+
+# Knowledge Graph (Memory System)
+networkx>=3.2.0
+# neo4j>=5.0.0  # Uncomment for production Neo4j support
 
 # File Processing
 pypdf>=5.0.0
@@ -27,14 +33,23 @@ pymupdf>=1.25.0
 # Search
 ddgs>=1.0.0
 
+# Voice Pipeline (Optional - install as needed)
+# deepgram-sdk>=3.0.0  # Deepgram STT
+# whisper>=1.0.0  # OpenAI Whisper (local)
+# torch>=2.0.0  # Required for Silero VAD
+numpy>=1.26.0
+
 # Utilities
 pydantic>=2.10.0
 pydantic-settings>=2.6.0
 python-dotenv>=1.0.0
 tenacity>=9.0.0
 aiofiles>=24.1.0
+httpx>=0.28.0
 
 # Development
 pytest>=8.3.0
-httpx>=0.28.0
+pytest-asyncio>=0.23.0
+
+# Optional: Ollama support
 langchain-ollama>=0.2.0

@@ -33,6 +33,18 @@ class ChatViewModel: ObservableObject {
     @Published var sessionCost: Double = 0.0
     @Published var totalTokensUsed: Int = 0
     
+    // Mode selection (Reasoning vs Fast)
+    @Published var selectedMode: AgentMode = .reasoning
+    
+    // Current plan tracking
+    @Published var currentPlan: [PlanStep] = []
+    @Published var planSummary: String = ""
+    @Published var hasPlan: Bool = false
+    
+    // Intent tracking
+    @Published var detectedIntent: String?
+    @Published var activeToolName: String?
+    
     private let streamingService = StreamingService()
     private let storage = ConversationStorage.shared
     private var cancellables = Set<AnyCancellable>()
@@ -123,6 +135,74 @@ class ChatViewModel: ObservableObject {
                 self?.totalTokensUsed += count
             }
             .store(in: &cancellables)
+        
+        // Observe plan - IMMEDIATELY update when plan changes
+        streamingService.$currentPlan
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] plan in
+                guard let self = self else { return }
+                self.currentPlan = plan
+                self.hasPlan = !plan.isEmpty
+                // Force immediate UI update
+                if !plan.isEmpty {
+                    self.updateAssistantPlanImmediate(plan: plan)
+                }
+            }
+            .store(in: &cancellables)
+        
+        // Observe plan summary separately
+        streamingService.$planSummary
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] summary in
+                guard let self = self else { return }
+                self.planSummary = summary
+                // Update summary if we have a plan
+                if !self.currentPlan.isEmpty {
+                    self.updateAssistantPlanImmediate(plan: self.currentPlan)
+                }
+            }
+            .store(in: &cancellables)
+        
+        // Observe intent from streaming service
+        streamingService.$detectedIntent
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] intent in
+                self?.detectedIntent = intent
+            }
+            .store(in: &cancellables)
+        
+        // Observe active tool - update plan step when tool is active
+        streamingService.$activeToolName
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] toolName in
+                self?.activeToolName = toolName
+            }
+            .store(in: &cancellables)
+    }
+    
+    /// Immediately update message plan - called whenever plan changes
+    private func updateAssistantPlanImmediate(plan: [PlanStep]) {
+        guard let messageId = currentAssistantMessageId,
+              let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
+        
+        let current = messages[index]
+        messages[index] = Message(
+            id: current.id,
+            role: current.role,
+            content: current.content,
+            reasoning: current.reasoning,
+            createdAt: current.createdAt,
+            isStreaming: current.isStreaming,
+            isError: current.isError,
+            tokenCount: current.tokenCount,
+            attachedFileIds: current.attachedFileIds,
+            attachedFileNames: current.attachedFileNames,
+            plan: plan.isEmpty ? nil : plan,
+            planSummary: planSummary.isEmpty ? current.planSummary : planSummary,
+            intent: detectedIntent ?? current.intent,
+            intentConfidence: streamingService.intentConfidence,
+            mode: selectedMode
+        )
     }
     
     private func handleError(_ error: String) {
@@ -132,48 +212,75 @@ class ChatViewModel: ObservableObject {
         
         if let messageId = currentAssistantMessageId,
            let index = messages.firstIndex(where: { $0.id == messageId }) {
+            let current = messages[index]
             messages[index] = Message(
                 id: messageId,
                 role: .assistant,
-                content: messages[index].content.isEmpty ? "Error: \(error)" : messages[index].content,
-                reasoning: messages[index].reasoning,
-                createdAt: messages[index].createdAt,
+                content: current.content.isEmpty ? "Error: \(error)" : current.content,
+                reasoning: current.reasoning,
+                createdAt: current.createdAt,
                 isStreaming: false,
-                isError: true
+                isError: true,
+                tokenCount: current.tokenCount,
+                attachedFileIds: current.attachedFileIds,
+                attachedFileNames: current.attachedFileNames,
+                plan: current.plan,
+                planSummary: current.planSummary,
+                intent: current.intent,
+                intentConfidence: current.intentConfidence,
+                mode: current.mode
             )
             currentAssistantMessageId = nil
         }
     }
     
+    /// Update message content while PRESERVING plan data
     private func updateAssistantMessage(content: String) {
         guard let messageId = currentAssistantMessageId,
               let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
         
+        let current = messages[index]
         messages[index] = Message(
             id: messageId,
             role: .assistant,
             content: content,
-            reasoning: messages[index].reasoning,
-            createdAt: messages[index].createdAt,
+            reasoning: current.reasoning,
+            createdAt: current.createdAt,
             isStreaming: true,
-            attachedFileIds: messages[index].attachedFileIds,
-            attachedFileNames: messages[index].attachedFileNames
+            isError: current.isError,
+            tokenCount: current.tokenCount,
+            attachedFileIds: current.attachedFileIds,
+            attachedFileNames: current.attachedFileNames,
+            plan: currentPlan.isEmpty ? current.plan : currentPlan, // PRESERVE PLAN
+            planSummary: planSummary.isEmpty ? current.planSummary : planSummary,
+            intent: detectedIntent ?? current.intent,
+            intentConfidence: streamingService.intentConfidence,
+            mode: selectedMode
         )
     }
     
+    /// Update reasoning while PRESERVING plan data
     private func updateAssistantReasoning(reasoning: [String]) {
         guard let messageId = currentAssistantMessageId,
               let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
         
+        let current = messages[index]
         messages[index] = Message(
             id: messageId,
             role: .assistant,
-            content: messages[index].content,
+            content: current.content,
             reasoning: reasoning,
-            createdAt: messages[index].createdAt,
+            createdAt: current.createdAt,
             isStreaming: true,
-            attachedFileIds: messages[index].attachedFileIds,
-            attachedFileNames: messages[index].attachedFileNames
+            isError: current.isError,
+            tokenCount: current.tokenCount,
+            attachedFileIds: current.attachedFileIds,
+            attachedFileNames: current.attachedFileNames,
+            plan: currentPlan.isEmpty ? current.plan : currentPlan, // PRESERVE PLAN
+            planSummary: planSummary.isEmpty ? current.planSummary : planSummary,
+            intent: detectedIntent ?? current.intent,
+            intentConfidence: streamingService.intentConfidence,
+            mode: selectedMode
         )
     }
     
@@ -185,8 +292,8 @@ class ChatViewModel: ObservableObject {
             return
         }
         
-        // Calculate approximate cost (GPT-5-nano pricing)
-        let tokenCost = Double(currentTokenCount) * 0.0000004 // $0.40 per 1M tokens
+        // Calculate approximate cost (GPT-4o pricing)
+        let tokenCost = Double(currentTokenCount) * 0.0000025 // $2.50 per 1M tokens
         sessionCost += tokenCost
         
         messages[index] = Message(
@@ -198,8 +305,20 @@ class ChatViewModel: ObservableObject {
             isStreaming: false,
             tokenCount: currentTokenCount,
             attachedFileIds: messages[index].attachedFileIds,
-            attachedFileNames: messages[index].attachedFileNames
+            attachedFileNames: messages[index].attachedFileNames,
+            plan: hasPlan ? currentPlan : nil,
+            planSummary: planSummary.isEmpty ? nil : planSummary,
+            intent: detectedIntent,
+            intentConfidence: streamingService.intentConfidence,
+            mode: selectedMode
         )
+        
+        // Reset plan state
+        currentPlan = []
+        planSummary = ""
+        hasPlan = false
+        detectedIntent = nil
+        activeToolName = nil
         
         currentAssistantMessageId = nil
         isLoading = false
@@ -264,8 +383,14 @@ class ChatViewModel: ObservableObject {
             ["role": msg.role.rawValue, "content": msg.content]
         }
         
-        // Send to API with full conversation history
-        await streamingService.sendMessage(trimmedText, fileIds: fileIds, conversationHistory: conversationHistory)
+        // Send to API with full conversation history and selected mode
+        await streamingService.sendMessage(
+            trimmedText,
+            fileIds: fileIds,
+            conversationHistory: conversationHistory,
+            mode: selectedMode,
+            conversationId: currentConversationId
+        )
     }
     
     // MARK: - Regenerate Message
