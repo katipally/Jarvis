@@ -4,8 +4,8 @@ A notch / dynamic-island conversational AI agent for macOS: a real Siri alternat
 controls the Mac, stays context-aware, remembers everything locally, and acts on its own.
 Pure Swift 6.3, one app process, macOS 26+ (Tahoe), local-first, no login, bring-your-own keys.
 
-Status: **v0.1 — all 9 milestones (M0–M8) code-complete.** ~28 headless tests green,
-every milestone verified on the real machine, zero build warnings.
+Status: **v0.2 — all 9 milestones (M0–M8) plus a full July-2026 audit pass (Section 11).**
+33 headless tests green, every milestone verified on the real machine, zero build warnings.
 
 ---
 
@@ -217,17 +217,22 @@ These are the course-corrections you gave during the build, folded into the desi
 
 ---
 
-## 7. The 25 agent tools
+## 7. The 31 agent tools
 
-- **Read-only (auto-run):** `list_apps`, `get_frontmost_app`, `clipboard_read`, `read_file`,
-  `read_artifact`, `ui_snapshot`, `calendar_list`, `reminders_list`, `recall_screen`,
-  `fetch_frames`, `take_screenshot`, `list_scheduled_tasks`.
+- **Read-only (auto-run):** `list_apps`, `get_frontmost_app`, `clipboard_read`†, `read_file`,
+  `list_files`, `read_artifact`, `fetch_url`, `ui_snapshot`†, `calendar_list`, `reminders_list`,
+  `recall_screen`†, `fetch_frames`†, `take_screenshot`†, `list_scheduled_tasks`, `remember`,
+  `search_memory`.
 - **External-effect (approval-gated):** `open_url`, `launch_app`, `activate_app`,
   `clipboard_write`, `write_file`, `ui_click`, `ui_type`, `ui_set_value`, `ui_key`, `ui_scroll`,
-  `calendar_add_event`, `reminders_add`, `mail_send`, `notes_create`, `schedule_task`.
+  `calendar_add_event`, `reminders_add`, `mail_send`, `notes_create`, `schedule_task`,
+  `cancel_scheduled_task`.
 
 Read-only tools that touch other apps or the screen still require the relevant TCC permission,
-prompted on first use. Background/proactive runs only ever see the read-only set.
+prompted on first use. Tools marked † are **sensitive** (clipboard / screen pixels / app UI
+text): they auto-run in foreground chats but are excluded from unattended background runs,
+which only ever see the non-sensitive read-only set. Long outputs (files, artifacts, web pages)
+paginate via an `offset` parameter instead of flooding the context.
 
 ---
 
@@ -237,7 +242,7 @@ prompted on first use. Background/proactive runs only ever see the read-only set
 # Toolchain: macOS 26+, Xcode 26+, Swift 6.3, xcodegen (brew install xcodegen)
 
 # Headless logic tests
-cd Packages/JarvisKit && swift test          # ~28 tests
+cd Packages/JarvisKit && swift test          # 33 tests
 
 # Build + run the app
 cd /Users/yashwanthreddy/Desktop/Jarvis
@@ -273,5 +278,39 @@ exercise once you add a key.
 
 TTS / full spoken conversation, a pure-vision escalation loop (AX + coordinate clicks cover v1),
 OCR indexing of screen frames, a richer memory editor, learned interruption preferences, Sparkle
-auto-update, system-audio/meeting capture, and extending image-carrying tool results beyond
-Anthropic to the OpenAI adapters.
+auto-update, system-audio/meeting capture, parallel read-only tool execution, session restore
+into the composer after relaunch, per-run dollar-cost display, screen-frame encryption at rest,
+aux-model transcript summarization (a size-capped sliding window covers v1), and a true web
+search tool (needs a search API; `fetch_url` covers direct pages).
+
+---
+
+## 11. The v0.2 audit (July 2026)
+
+A full E2E audit (agent harness vs SOTA, UI/UX vs Apple HIG, architecture/concurrency) ran
+against v0.1; every critical and major finding was fixed. Highlights:
+
+- **Providers modernized to the July-2026 API surface.** Anthropic: adaptive thinking +
+  `output_config.effort` (the old `budget_tokens` shape is rejected by all current models),
+  prompt caching via `cache_control`, signed-thinking replay before `tool_use`, cache-token
+  accounting. Anthropic-compatible endpoints (MiniMax) keep the legacy shape. OpenAI Responses:
+  encrypted reasoning-item replay (`store:false`), truncation handling. Both OpenAI adapters
+  now carry tool-result images via follow-up messages.
+- **The interrupt path actually works.** Cancellation ends stream iteration before `.aborted`
+  can be delivered, so transcript repair now runs after the loop; end-of-run persistence moved
+  to an unstructured task (GRDB honors cancellation — runs were sticking at "running").
+- **A real system prompt** (identity, tool guidance, notch-appropriate brevity), byte-stable
+  for prompt caching; date/time/frontmost-app/memory ride in a per-turn `<context>` block.
+  Transcripts reset per segment and cap by size.
+- **Memory extraction actually fires.** Segments now close on quit and orphans are recovered
+  (and extracted) on launch; `remember` writes durable memory mid-turn.
+- **Privacy:** background runs lost clipboard/screen/UI-text tools; the proactive token budget
+  counts input+output; frame TTL sweeps run even without capture permission.
+- **Approvals:** the panel holds open while a prompt is pending, timed-out cards are removed,
+  `mail_send` approval shows the full body and scopes per recipient.
+- **Apple-grade UI pass:** full keyboard support (Esc, ⌘1–4, Return/Esc on approvals), a
+  semantic color/type system, `symbolEffect` micro-animation layer, matched-geometry tab pill,
+  Reduce Motion everywhere, designed error state with Retry, image thumbnails, elapsed time on
+  tools, and accessibility labels throughout.
+
+All 33 package tests green; the app builds with zero warnings.
