@@ -58,8 +58,8 @@ public final class MeetingTranscriber: @unchecked Sendable {
         self.continuation = continuation
 
         // MIC channel — always on.
-        let mic = TranscriptionSession(source: .mic) { [weak self] text in
-            self?.continuation?.yield(MeetingUtterance(source: .mic, text: text))
+        let mic = TranscriptionSession(source: .mic) { text in
+            continuation.yield(MeetingUtterance(source: .mic, text: text))
         }
         try await mic.start(locale: locale)
         startMicTap(into: mic)
@@ -67,15 +67,18 @@ public final class MeetingTranscriber: @unchecked Sendable {
 
         // SYSTEM channel — best-effort; degrade to mic-only on any failure.
         do {
-            let system = TranscriptionSession(source: .system) { [weak self] text in
-                self?.continuation?.yield(MeetingUtterance(source: .system, text: text))
+            let system = TranscriptionSession(source: .system) { text in
+                continuation.yield(MeetingUtterance(source: .system, text: text))
             }
             try await system.start(locale: locale)
+            // Publish the started session before the next throwing call so the
+            // catch below can stop it (a thrown tap.start() would otherwise leak
+            // this live analyzer session).
+            self.systemSession = system
 
             let tap = SystemAudioTap(sampleRate: 48_000)
             let buffers = try await tap.start()
 
-            self.systemSession = system
             self.systemTap = tap
             self.systemAudioActive = true
             self.systemPump = Task { [weak self] in

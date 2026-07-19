@@ -11,6 +11,7 @@ struct RunDetailView: View {
     var onBack: (() -> Void)? = nil
 
     @State private var detail: RunStore.RunDetail?
+    @State private var didLoad = false
 
     var body: some View {
         ScrollView {
@@ -53,14 +54,24 @@ struct RunDetailView: View {
                             .font(.jarvisCaption)
                             .foregroundStyle(.white.opacity(0.5))
                     }
-                } else {
+                } else if !didLoad {
                     HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
+                        .padding(.top, 30)
+                } else {
+                    Text("Couldn't load this run.")
+                        .font(.jarvisCaption)
+                        .foregroundStyle(.white.opacity(0.5))
+                        .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 30)
                 }
             }
             .padding(.bottom, 10)
         }
-        .task(id: runID) { detail = await runStore.fetchRun(id: runID) }
+        .task(id: runID) {
+            didLoad = false
+            detail = await runStore.fetchRun(id: runID)
+            didLoad = true
+        }
     }
 
     private func header(_ d: RunStore.RunDetail) -> some View {
@@ -173,18 +184,20 @@ private struct RunToolRow: View {
     }
 
     private var icon: String {
+        if tool.isError { return "exclamationmark.triangle.fill" }
         switch tool.state {
-        case "error": "exclamationmark.triangle.fill"
-        case "running": "gearshape.fill"
-        default: "checkmark.circle.fill"
+        case "error": return "exclamationmark.triangle.fill"
+        case "running": return "gearshape.fill"
+        default: return "checkmark.circle.fill"
         }
     }
 
     private var tint: Color {
+        if tool.isError { return Color.jarvisError }
         switch tool.state {
-        case "error": Color.jarvisError
-        case "running": .white.opacity(0.6)
-        default: Color.jarvisSuccess
+        case "error": return Color.jarvisError
+        case "running": return .white.opacity(0.6)
+        default: return Color.jarvisSuccess
         }
     }
 }

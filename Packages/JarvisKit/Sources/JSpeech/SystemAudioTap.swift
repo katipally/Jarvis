@@ -22,15 +22,21 @@ public enum SystemAudioTapError: Error, LocalizedError {
 /// so it is deliberately self-contained and guards every failure — if SCK can't
 /// start, `start()` throws and the caller degrades to mic-only.
 ///
-/// All SCK callbacks (`didOutputSampleBuffer`, `didStopWithError`) arrive on the
-/// private `sampleQueue`; they only touch the thread-safe stream continuation, so
-/// no locking is needed. Screen Recording permission (which also gates system
-/// audio) is prompted by the OS on first `startCapture()`.
+/// SCK callbacks arrive on two different queues — `didOutputSampleBuffer` on the
+/// private `sampleQueue`, `didStopWithError` on the delegate queue — and `stop()`
+/// runs on yet another. The `stream`/`continuation` properties are therefore
+/// mutated concurrently, so every read/write of them is serialized behind `lock`
+/// (the thread-safe continuation methods are called on a local copy taken under
+/// the lock, never while holding it). Screen Recording permission (which also
+/// gates system audio) is prompted by the OS on first `startCapture()`.
 public final class SystemAudioTap: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private let log = Logger(subsystem: "com.jarvis.speech", category: "SystemAudioTap")
     private let sampleQueue = DispatchQueue(label: "com.jarvis.systemaudio.samples")
     private let sampleRate: Int
 
+    /// Guards `stream` and `continuation`, which are touched from the sample queue,
+    /// the delegate queue, and `stop()` concurrently.
+    private let lock = NSLock()
     private var stream: SCStream?
     private var continuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
 
@@ -77,28 +83,37 @@ public final class SystemAudioTap: NSObject, SCStreamOutput, SCStreamDelegate, @
 
         let (buffers, continuation) = AsyncStream<AVAudioPCMBuffer>.makeStream()
         // Set the continuation BEFORE startCapture — delivery only begins after it.
-        self.continuation = continuation
-        self.stream = stream
+        // Scoped withLock is async-safe (bare lock()/unlock() are not).
+        lock.withLock {
+            self.continuation = continuation
+            self.stream = stream
+        }
 
         do {
             try await stream.startCapture()
         } catch {
             continuation.finish()
-            self.continuation = nil
-            self.stream = nil
+            lock.withLock {
+                self.continuation = nil
+                self.stream = nil
+            }
             throw SystemAudioTapError.streamSetupFailed(error.localizedDescription)
         }
         return buffers
     }
 
     public func stop() async {
+        let (stream, continuation): (SCStream?, AsyncStream<AVAudioPCMBuffer>.Continuation?) = lock.withLock {
+            let s = self.stream; self.stream = nil
+            let c = self.continuation; self.continuation = nil
+            return (s, c)
+        }
+
         if let stream {
             try? await stream.stopCapture()
             try? stream.removeStreamOutput(self, type: .audio)
         }
-        stream = nil
         continuation?.finish()
-        continuation = nil
     }
 
     // MARK: - SCStreamOutput (private queue)
@@ -106,15 +121,18 @@ public final class SystemAudioTap: NSObject, SCStreamOutput, SCStreamDelegate, @
     public func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio, sampleBuffer.isValid,
               let pcm = Self.copyPCMBuffer(from: sampleBuffer) else { return }
+        let continuation = lock.withLock { self.continuation }
         continuation?.yield(pcm)
     }
 
-    // MARK: - SCStreamDelegate (private queue)
+    // MARK: - SCStreamDelegate (delegate queue)
 
     public func stream(_ stream: SCStream, didStopWithError error: Error) {
         log.error("system-audio stream stopped: \(error.localizedDescription, privacy: .public)")
+        let continuation = lock.withLock {
+            let c = self.continuation; self.continuation = nil; return c
+        }
         continuation?.finish()
-        continuation = nil
     }
 
     // MARK: - Audio

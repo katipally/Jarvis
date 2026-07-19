@@ -59,10 +59,31 @@ public final class ScreenBuffer: @unchecked Sendable {
 
     public func start() {
         if ocrConsumer == nil {
+            // Reference self weakly per iteration (never `guard let self` across the
+            // whole never-finishing loop) so the consumer can't pin the instance
+            // alive; stop() cancels it, which makes the stream's next() return nil.
             ocrConsumer = Task { [weak self] in
+                guard let stream = self?.ocrJobs else { return }
+                for await job in stream {
+                    await self?.performOCR(job)
+                }
+            }
+            // Re-enqueue frames left OCR-pending by a previous run (e.g. the app quit
+            // before the serial pipeline drained). Frames whose JPEG was already swept
+            // are marked skipped so search_screen doesn't wait on them forever.
+            Task { [weak self] in
                 guard let self else { return }
-                for await job in self.ocrJobs {
-                    await self.performOCR(job)
+                let rows = (try? await self.database.reader.read { db in
+                    try Row.fetchAll(db, sql: "SELECT id, jpeg_path FROM screen_frame WHERE ocr_status = 'pending'")
+                }) ?? []
+                for row in rows {
+                    let id: String = row["id"]
+                    let path: String = row["jpeg_path"]
+                    if FileManager.default.fileExists(atPath: path) {
+                        self.ocrEnqueue.yield(OCRJob(id: id, jpegPath: path))
+                    } else {
+                        await self.markOCR(id: id, text: nil, status: "skipped")
+                    }
                 }
             }
         }
@@ -81,6 +102,8 @@ public final class ScreenBuffer: @unchecked Sendable {
     public func stop() {
         task?.cancel()
         task = nil
+        ocrConsumer?.cancel()
+        ocrConsumer = nil
     }
 
     private func tick() async {
@@ -119,8 +142,20 @@ public final class ScreenBuffer: @unchecked Sendable {
     @discardableResult
     public func captureNow() async throws -> CapturedFrame {
         guard ScreenCapture.hasPermission else { throw ScreenError.permissionDenied }
+        // Honor the same privacy gates the passive tick() path enforces so an
+        // on-demand capture can't bypass them: the master switch (documented as
+        // "no frames are captured at all" when off) and the never-persist blocklist
+        // plus the user's exclusions. Without this, take_screenshot would persist,
+        // OCR, and full-text-index a disabled-mode or blocklisted screen.
+        let policy = self.policy
+        guard policy.enabled else { throw ScreenBufferError.disabled }
         guard let frame = try await ScreenCapture.captureFrontWindow() else {
             throw ScreenError.noWindow
+        }
+        // Gate on the app actually captured (frame.appBundleID), not the frontmost app.
+        if let bundle = frame.appBundleID,
+           blocklist.contains(bundle) || policy.excludedBundleIDs.contains(bundle) {
+            throw ScreenBufferError.blocked
         }
         await store(frame, trigger: "on_demand")
         return frame
@@ -135,7 +170,16 @@ public final class ScreenBuffer: @unchecked Sendable {
             windowTitle: frame.windowTitle, displayId: frame.displayID, phash: frame.phash,
             jpegPath: path.path, bytes: frame.jpeg.count, trigger: trigger
         )
-        _ = try? await database.writer.write { try row.insert($0) }
+        // Tie the JPEG to its row: if the insert fails or is cancelled (e.g. stop()
+        // cancels a tick mid-store), reclaim the file so it can't orphan — sweep()
+        // only enumerates rows to delete files, and the disk ceiling sums row bytes,
+        // so an orphan would never be reclaimed nor counted toward the ceiling.
+        do {
+            try await database.writer.write { try row.insert($0) }
+        } catch {
+            try? FileManager.default.removeItem(at: path)
+            return
+        }
 
         // Skip OCR for a frame perceptually identical to the previous kept one
         // (e.g. switching back to an unchanged window). Otherwise enqueue it on the
@@ -182,6 +226,26 @@ public final class ScreenBuffer: @unchecked Sendable {
                     total -= frame.bytes
                 }
             }
+        }
+    }
+}
+
+/// On-demand capture refusals that keep `captureNow()` inside the same privacy
+/// contract the passive path enforces. Surfaced to the model by `take_screenshot`
+/// (its handler falls back to `error.localizedDescription`, which LocalizedError
+/// bridges to `errorDescription`).
+public enum ScreenBufferError: Error, LocalizedError {
+    /// Screen Rewind's master switch is off — no frame may be captured at all.
+    case disabled
+    /// The captured app is on the password-manager blocklist or the user's
+    /// exclusion list — its screen is never persisted.
+    case blocked
+    public var errorDescription: String? {
+        switch self {
+        case .disabled:
+            "Screen Rewind is turned off, so I can't capture the screen. Enable it in Settings first."
+        case .blocked:
+            "That app is on the screen-capture blocklist, so I can't capture it."
         }
     }
 }

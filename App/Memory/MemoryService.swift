@@ -48,8 +48,11 @@ final class MemoryService {
         }
         idleTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(45))
-            guard !Task.isCancelled else { return }
-            await self?.runExtraction()
+            guard !Task.isCancelled, let self else { return }
+            self.idleTask = nil
+            // Detached: a resuming turn's `idleTask?.cancel()` (now targeting a
+            // new idle task) can't abort these DB writes mid-extraction.
+            Task { await self.runExtraction() }
         }
     }
 
@@ -63,7 +66,21 @@ final class MemoryService {
     /// Extract from all pending (unextracted) user messages, then mark them done
     /// on success. On failure the rows stay pending for the next sweep/turn.
     private func runExtraction() async {
-        guard !extracting else { return }
+        guard !extracting else {
+            // A run is already processing a snapshot taken before these turns
+            // landed; re-arm the idle fallback so they aren't stranded until the
+            // next turn or bootSweep. Detached extraction (as in turnCompleted)
+            // keeps a later `idleTask?.cancel()` from aborting writes.
+            if idleTask == nil {
+                idleTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(45))
+                    guard !Task.isCancelled, let self else { return }
+                    self.idleTask = nil
+                    Task { await self.runExtraction() }
+                }
+            }
+            return
+        }
         extracting = true
         defer { extracting = false }
 
@@ -90,6 +107,7 @@ final class MemoryService {
     /// a result, so the caller leaves the rows pending for a retry.
     private func extractAndIngest(_ conversation: String, segmentID: String?) async -> Bool {
         var produced = false
+        var anyFailed = false
         for chunk in localChunks(conversation, maxChars: 4000) {
             if let extraction = await local.generate(
                 LocalExtraction.self, instructions: Self.extractionInstructions,
@@ -97,9 +115,14 @@ final class MemoryService {
             ) {
                 await ingest(extraction, segmentID: segmentID)
                 produced = true
+            } else {
+                anyFailed = true
             }
         }
-        if produced { return true }
+        // Only report done when every chunk produced output; a partial success
+        // leaves the rows pending so a later sweep re-extracts the failed chunk.
+        // Re-ingesting the succeeded chunks then is safe — the store dedups.
+        if produced { return !anyFailed }
 
         // Fallback: aux/brain JSON path (memories/entities/relations only).
         guard let resolved = core.resolve(.aux) ?? core.resolve(.brain) else { return false }

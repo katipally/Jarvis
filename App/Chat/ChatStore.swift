@@ -297,6 +297,14 @@ final class ChatStore {
             if Task.isCancelled {
                 self.repairDanglingTools(runID: runID)
                 self.markActiveAborted()
+                // A tool interrupted by Stop would otherwise spin its row and
+                // count up forever, and its tool_call row would stick at
+                // "running" in Activity. Finalize both.
+                let stuckIDs = self.messages.filter { $0.role == .tool && $0.toolState == .running }.map(\.id)
+                for id in stuckIDs {
+                    self.updateToolRow(id: id, output: "Cancelled by the user.", isError: true)
+                    await runStore.toolFinished(id: id, state: "error", preview: "Cancelled by the user.")
+                }
             }
             if completion == .refusal {
                 self.showFailure("The model declined to answer this request.")

@@ -49,10 +49,11 @@ public struct CronStore: Sendable {
         if let existing = try? await database.reader.read({ db in try CronJobRow.fetchOne(db, key: id) }),
            var updated = existing as CronJobRow? {
             let exprChanged = updated.cronExpr != cronExpr
+            let staleReenable = enabled && !updated.enabled && updated.nextRunAt <= now
             updated.name = name
             updated.cronExpr = cronExpr
             updated.enabled = enabled
-            if exprChanged { updated.nextRunAt = next }
+            if exprChanged || staleReenable { updated.nextRunAt = next }
             let final = updated
             _ = try? await database.writer.write { db in try final.update(db) }
         } else {

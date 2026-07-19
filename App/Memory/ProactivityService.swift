@@ -127,7 +127,11 @@ final class ProactivityService {
     }
 
     private func reloadConfig() async {
+        let wasMuted = muted
         muted = await setting("proactive_muted", default: false)
+        // Unmuting later must (re)request notification auth — it's never asked
+        // for again after launch otherwise, so post() would silently no-op.
+        if wasMuted && !muted { notifications.requestAuth() } // idempotent; system prompts once
         dailyTokenLimit = await setting("proactive_token_budget", default: 200_000)
         applyAggressiveness(await setting("proactive_aggressiveness", default: "balanced"))
 
@@ -292,9 +296,10 @@ final class ProactivityService {
         guard !muted else { return }
         let soon = Date.now.addingTimeInterval(15 * 60)
         for c in await tasks.dueCommitments(by: soon) {
-            await tasks.setCommitmentStatus(c.id, .notified)
-            await deliver(title: "Reminder", body: commitmentReminder(c),
-                          trigger: "commitment", dedupKey: "commitment:\(c.id)", frameID: nil)
+            if await deliver(title: "Reminder", body: commitmentReminder(c),
+                             trigger: "commitment", dedupKey: "commitment:\(c.id)", frameID: nil) {
+                await tasks.setCommitmentStatus(c.id, .notified)
+            }
         }
     }
 
@@ -335,12 +340,14 @@ final class ProactivityService {
 
     // MARK: - Delivery
 
-    private func deliver(title: String, body: String, trigger: String, dedupKey: String?, frameID: String?) async {
+    @discardableResult
+    private func deliver(title: String, body: String, trigger: String, dedupKey: String?, frameID: String?) async -> Bool {
         let clean = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, !muted else { return }
+        guard !clean.isEmpty, !muted else { return false }
         await funnel.record(NudgeRow(trigger: trigger, frameId: frameID, dedupKey: dedupKey, title: title, body: clean))
         notifications.post(title: title, body: clean)
         chat.receiveProactive(clean)
+        return true
     }
 
     /// Runs a background agent turn AND records it like a foreground run —

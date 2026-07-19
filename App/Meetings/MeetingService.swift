@@ -156,19 +156,21 @@ final class MeetingService {
 
     private func endMeeting() async {
         guard let transcriber, let meeting else { return }
+        // Claim ownership synchronously, before any await, so a second concurrent
+        // call hits the guard and returns instead of double-finalizing the meeting.
+        self.transcriber = nil
+        self.meeting = nil
+        meetingBundleID = nil
         isActive = false
         pump?.cancel()
         pump = nil
-        await transcriber.stop()
-        self.transcriber = nil
-        lines = []
 
         let captured = transcript
         let appName = activeAppName
         transcript = []
-        self.meeting = nil
-        meetingBundleID = nil
+        lines = []
 
+        await transcriber.stop()
         await finalize(meeting: meeting, endedAt: .now, transcript: captured, appName: appName)
     }
 

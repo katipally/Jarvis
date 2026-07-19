@@ -18,8 +18,15 @@ public struct MemoryStore: Sendable {
 
     /// Write extraction output: memories (short-term) + graph projection.
     public func ingest(_ result: ExtractionResult, segmentID: String?, now: Date = .now) async {
+        // Embed candidate texts OUTSIDE the write lock — NLContextualEmbedding
+        // inference must not run while the single GRDB writer is held (mirrors
+        // reembedMissing). Only the inserts below are transacted.
+        let vectors = result.memories.map {
+            embedder.embed($0.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
         let graphChanged = (try? await database.writer.write { db -> Bool in
-            for memory in result.memories {
+            for (i, memory) in result.memories.enumerated() {
                 let clean = memory.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !clean.isEmpty else { continue }
                 // Skip exact duplicates already active.
@@ -30,7 +37,7 @@ public struct MemoryStore: Sendable {
                 if exists { continue }
 
                 // Semantic near-duplicate: skip when a paraphrase is already stored.
-                let vector = embedder.embed(clean)
+                let vector = vectors[i]
                 if let vector, try isNearDuplicate(db, vector: vector, threshold: 0.92) { continue }
 
                 let row = MemoryRow(
