@@ -15,6 +15,7 @@ struct ListeningView: View {
                 Waveform(level: voice.level, active: voice.phase == .listening)
                     .frame(maxWidth: .infinity)
                     .padding(.trailing, 8)
+                    .accessibilityHidden(true)
                 Color.clear.frame(width: cameraWidth + 22)
                 Group {
                     if voice.phase == .processing {
@@ -23,6 +24,7 @@ struct ListeningView: View {
                         Image(systemName: "mic.fill")
                             .font(.system(size: 9))
                             .foregroundStyle(.white.opacity(0.85))
+                            .symbolEffect(.pulse, isActive: voice.phase == .listening)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -31,12 +33,12 @@ struct ListeningView: View {
 
             // Transcript sits below the camera cutout.
             Text(displayText)
-                .font(.system(size: 11, weight: .medium))
+                .font(.jarvisCaption.weight(.medium))
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(1)
                 .truncationMode(.head)
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 16)
         }
     }
 
@@ -47,24 +49,43 @@ struct ListeningView: View {
     }
 }
 
-/// A symmetric bar waveform driven by the live audio level.
+/// A symmetric bar waveform driven by the live audio level. With Reduce Motion
+/// on, the bars hold a static mid-height profile instead of animating.
 private struct Waveform: View {
     let level: Float
     let active: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private let barCount = 9
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            HStack(spacing: 3) {
-                ForEach(0..<barCount, id: \.self) { i in
-                    Capsule()
-                        .fill(.white.opacity(0.85))
-                        .frame(width: 2.5, height: barHeight(index: i, time: t))
-                }
+        if reduceMotion {
+            bars { i in staticHeight(index: i) }
+        } else {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                bars { i in barHeight(index: i, time: t) }
             }
         }
+    }
+
+    private func bars(height: @escaping (Int) -> CGFloat) -> some View {
+        HStack(spacing: 3) {
+            ForEach(0..<barCount, id: \.self) { i in
+                Capsule()
+                    .fill(.white.opacity(0.85))
+                    .frame(width: 2.5, height: height(i))
+            }
+        }
+    }
+
+    private func staticHeight(index: Int) -> CGFloat {
+        guard active else { return 3 }
+        let center = Double(barCount - 1) / 2
+        let distance = abs(Double(index) - center) / center
+        let falloff = 1.0 - distance * 0.6
+        return 3 + CGFloat(falloff) * 6
     }
 
     private func barHeight(index: Int, time: Double) -> CGFloat {

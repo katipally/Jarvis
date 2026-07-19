@@ -18,10 +18,13 @@ struct GraphView: View {
             HStack {
                 Toggle("Show history", isOn: $includeHistory)
                     .toggleStyle(.switch).controlSize(.mini)
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.6))
+                    .font(.jarvisCaption).foregroundStyle(.white.opacity(0.6))
                 Spacer()
                 Text("\(snapshot.nodes.count) nodes")
-                    .font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                    .font(.jarvisFootnote).monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.snappy, value: snapshot.nodes.count)
+                    .foregroundStyle(.white.opacity(0.55))
             }
             .padding(.horizontal, 4)
 
@@ -29,14 +32,15 @@ struct GraphView: View {
                 Spacer()
                 VStack(spacing: 8) {
                     Image(systemName: "point.3.connected.trianglepath.dotted")
-                        .font(.system(size: 24, weight: .light)).foregroundStyle(.white.opacity(0.3))
+                        .font(.system(size: 24, weight: .light)).foregroundStyle(.white.opacity(0.55))
                     Text("Your knowledge graph will grow as you talk to Jarvis")
-                        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
+                        .font(.jarvisCaption).foregroundStyle(.white.opacity(0.55))
                         .multilineTextAlignment(.center)
                 }
                 Spacer()
             } else {
                 canvas
+                legend
             }
         }
         .task { await reload() }
@@ -54,7 +58,26 @@ struct GraphView: View {
             .onTapGesture { location in selectNode(near: location, in: geo.size) }
             .onAppear { startLayout(in: geo.size) }
             .onChange(of: geo.size) { _, newSize in startLayout(in: newSize) }
+            .accessibilityHidden(true)
         }
+    }
+
+    /// Tiny kind→color key so the node colors are decodable at a glance.
+    private var legend: some View {
+        let kinds: [(String, String)] = [
+            ("person", "People"), ("org", "Orgs"), ("project", "Projects"),
+            ("place", "Places"), ("artifact", "Artifacts"), ("other", "Other"),
+        ]
+        return HStack(spacing: 10) {
+            ForEach(kinds, id: \.0) { kind, label in
+                HStack(spacing: 4) {
+                    Circle().fill(kindColor(kind)).frame(width: 6, height: 6)
+                    Text(label).font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55))
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 4)
     }
 
     // MARK: - Drawing
@@ -73,7 +96,7 @@ struct GraphView: View {
                 let mid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
                 context.draw(
                     Text(edge.relation.replacingOccurrences(of: "_", with: " "))
-                        .font(.system(size: 8)).foregroundStyle(.white.opacity(0.6)),
+                        .font(.system(size: 10)).foregroundStyle(.white.opacity(0.6)),
                     at: mid
                 )
             }
@@ -89,7 +112,7 @@ struct GraphView: View {
             context.fill(Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)),
                          with: .color(color))
             context.draw(
-                Text(node.name).font(.system(size: isSelected ? 11 : 9, weight: isSelected ? .semibold : .regular))
+                Text(node.name).font(.system(size: isSelected ? 11 : 10, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(.white.opacity(isSelected ? 0.95 : 0.65)),
                 at: CGPoint(x: p.x, y: p.y - radius - 7)
             )
@@ -98,10 +121,10 @@ struct GraphView: View {
 
     private func kindColor(_ kind: String) -> Color {
         switch kind {
-        case "person": .blue
+        case "person": .jarvisAccent
         case "org": .orange
         case "project": .purple
-        case "place": .green
+        case "place": .jarvisSuccess
         case "artifact": .pink
         default: .teal
         }
@@ -113,9 +136,13 @@ struct GraphView: View {
         layout?.cancel()
         seedPositions(in: size)
         layout = Task {
-            for _ in 0..<600 {
+            // Stop as soon as the simulation settles (kinetic energy below a
+            // per-node threshold) instead of always burning 600 iterations.
+            let threshold = max(CGFloat(snapshot.nodes.count) * 0.02, 0.05)
+            for iteration in 0..<600 {
                 if Task.isCancelled { return }
-                await MainActor.run { step(in: size) }
+                let energy = await MainActor.run { step(in: size) }
+                if iteration > 10, energy < threshold { return }
                 try? await Task.sleep(for: .milliseconds(16))
             }
         }
@@ -130,8 +157,10 @@ struct GraphView: View {
         }
     }
 
-    /// One tick of a basic spring/repulsion simulation.
-    private func step(in size: CGSize) {
+    /// One tick of a basic spring/repulsion simulation. Returns the total
+    /// kinetic energy, so the layout loop can stop once it converges.
+    @discardableResult
+    private func step(in size: CGSize) -> CGFloat {
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         var forces: [String: CGVector] = [:]
 
@@ -162,6 +191,7 @@ struct GraphView: View {
             forces[edge.target]?.dx -= fx; forces[edge.target]?.dy -= fy
         }
 
+        var energy: CGFloat = 0
         for node in snapshot.nodes {
             guard var p = positions[node.id], var v = velocities[node.id], let f = forces[node.id] else { continue }
             // Gentle pull to center + damping.
@@ -171,7 +201,9 @@ struct GraphView: View {
             p.y = min(max(p.y + v.dy, 20), size.height - 12)
             positions[node.id] = p
             velocities[node.id] = v
+            energy += v.dx * v.dx + v.dy * v.dy
         }
+        return energy
     }
 
     private func selectNode(near location: CGPoint, in size: CGSize) {

@@ -6,6 +6,8 @@ struct NotchView: View {
     var chat: ChatStore?
     var voice: VoiceController?
     @State private var isHovering = false
+    @Namespace private var tabPillNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isVoiceHost: Bool {
         // Voice state renders on the screen where the user is (mouse/active),
@@ -37,12 +39,25 @@ struct NotchView: View {
         return false
     }
 
-    private let openAnimation = Animation.spring(response: 0.40, dampingFraction: 0.78)
-    private let closeAnimation = Animation.spring(response: 0.34, dampingFraction: 0.9)
-    private let tabAnimation = Animation.spring(response: 0.36, dampingFraction: 0.82)
+    // Reduce Motion swaps the scale springs for a plain crossfade-style ease.
+    private var openAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.25) : NotchAnimation.open
+    }
+    private var closeAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : NotchAnimation.close
+    }
+    private var tabAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : NotchAnimation.tab
+    }
 
     private var sizeAnimation: Animation {
         vm.state == .open ? openAnimation : closeAnimation
+    }
+
+    private var contentTransition: AnyTransition {
+        reduceMotion
+            ? .opacity
+            : .scale(scale: 0.94, anchor: .top).combined(with: .opacity)
     }
 
     private var topCornerRadius: CGFloat { vm.state == .open ? 20 : 6 }
@@ -76,6 +91,7 @@ struct NotchView: View {
                 // Tiny even bleed so the border glow peeks from behind the edges.
                 .scaleEffect(1.012)
                 .allowsHitTesting(false)
+                .accessibilityHidden(true)
                 .transition(.opacity)
             }
             clippedBody
@@ -148,7 +164,11 @@ struct NotchView: View {
                             ApprovalPrompt(request: request, presenter: chat.agent.presenter)
                         }
                     }
-                    .transition(.scale(scale: 0.94, anchor: .top).combined(with: .opacity))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: chat?.agent.presenter.current?.id)
+                    .onExitCommand {
+                        withAnimation(closeAnimation) { vm.close() }
+                    }
+                    .transition(contentTransition)
             } else if showsListening, let voice {
                 ListeningView(voice: voice, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height)
                     .transition(.opacity)
@@ -185,7 +205,16 @@ struct NotchView: View {
     }
 
     private func tabButton(_ tab: NotchViewModel.Tab) -> some View {
-        TabButton(tab: tab, isSelected: vm.selectedTab == tab) {
+        // ⌘1…⌘4 in declaration order.
+        let index = NotchViewModel.Tab.allCases.firstIndex(of: tab) ?? 0
+        let key = KeyEquivalent(Character("\(index + 1)"))
+        return TabButton(
+            tab: tab,
+            isSelected: vm.selectedTab == tab,
+            shortcut: key,
+            namespace: tabPillNamespace,
+            reduceMotion: reduceMotion
+        ) {
             withAnimation(tabAnimation) { vm.selectedTab = tab }
         }
     }
@@ -222,26 +251,43 @@ struct NotchView: View {
 private struct TabButton: View {
     let tab: NotchViewModel.Tab
     let isSelected: Bool
+    let shortcut: KeyEquivalent
+    let namespace: Namespace.ID
+    let reduceMotion: Bool
     let action: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
-        Image(systemName: tab.symbol)
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(isSelected ? .white : .white.opacity(0.45))
-            .frame(width: 30, height: 26)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(.white.opacity(isSelected ? 0.12 : (isHovering ? 0.07 : 0)))
-            )
-            // "Options" scale on interaction, matching the notch's scale language.
-            .scaleEffect(isSelected ? 1.14 : (isHovering ? 1.1 : 1.0))
-            .contentShape(Rectangle())
-            .onHover { hovering in
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { isHovering = hovering }
+        Button(action: action) {
+            Image(systemName: tab.symbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(isSelected ? .white : .white.opacity(0.45))
+                .frame(width: 30, height: 26)
+                .background {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(.white.opacity(0.12))
+                            // One shared namespace, so the pill glides between
+                            // the two header clusters as the selection moves.
+                            .matchedGeometryEffect(id: "tabPill", in: namespace)
+                    } else if isHovering {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(.white.opacity(0.07))
+                    }
+                }
+                // "Options" scale on interaction, matching the notch's scale language.
+                .scaleEffect(reduceMotion ? 1.0 : (isSelected ? 1.14 : (isHovering ? 1.1 : 1.0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(shortcut, modifiers: .command)
+        .pointerStyle(.link)
+        .onHover { hovering in
+            withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.25, dampingFraction: 0.7)) {
+                isHovering = hovering
             }
-            .onTapGesture(perform: action)
-            .accessibilityLabel(tab.label)
+        }
+        .accessibilityLabel(tab.label)
     }
 }

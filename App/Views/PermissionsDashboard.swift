@@ -6,7 +6,7 @@ struct PermissionsDashboard: View {
     @State private var states: [Permission: PermissionState] = [:]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: 12) {
             sectionHeader
 
             ForEach(Permission.allCases) { permission in
@@ -21,18 +21,18 @@ struct PermissionsDashboard: View {
 
     private var sectionHeader: some View {
         Text("PERMISSIONS")
-            .font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.5)).tracking(0.5)
+            .font(.jarvisCaption.weight(.semibold)).foregroundStyle(.white.opacity(0.5)).tracking(0.5)
     }
 
     private func row(_ permission: Permission) -> some View {
         let state = states[permission] ?? .notDetermined
-        return HStack(spacing: 11) {
+        return HStack(spacing: 12) {
             Image(systemName: permission.symbol)
                 .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 1) {
-                Text(permission.title).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.9))
-                Text(permission.detail).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                Text(permission.title).font(.jarvisRow).foregroundStyle(.white.opacity(0.9))
+                Text(permission.detail).font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55))
             }
             Spacer()
             statusControl(permission, state)
@@ -45,22 +45,19 @@ struct PermissionsDashboard: View {
     private func statusControl(_ permission: Permission, _ state: PermissionState) -> some View {
         switch state {
         case .granted:
-            Label("Granted", systemImage: "checkmark.circle.fill")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color(red: 0.4, green: 0.85, blue: 0.5))
-                .labelStyle(.iconOnly)
-                .overlay(alignment: .trailing) {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 15))
-                        .foregroundStyle(Color(red: 0.4, green: 0.85, blue: 0.5))
-                }
+            Image(systemName: "checkmark.circle.fill")
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: 15))
+                .foregroundStyle(Color.jarvisSuccess)
+                .accessibilityLabel("Granted")
         case .denied:
             Button("Open Settings") { PermissionsChecker.openSettings(permission); scheduleRefresh() }
-                .buttonStyle(.plain).font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color(red: 1, green: 0.6, blue: 0.4))
+                .buttonStyle(.plain).font(.jarvisCaption.weight(.medium))
+                .foregroundStyle(Color.jarvisWarning)
         case .notDetermined:
             Button("Grant") { PermissionsChecker.request(permission); scheduleRefresh() }
-                .buttonStyle(.plain).font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color(red: 0.4, green: 0.7, blue: 1.0))
+                .buttonStyle(.plain).font(.jarvisCaption.weight(.semibold))
+                .foregroundStyle(Color.jarvisLink)
         }
     }
 

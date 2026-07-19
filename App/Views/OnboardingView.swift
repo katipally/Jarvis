@@ -14,7 +14,12 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .transition(.opacity)
+                // Steps only ever advance, so slide new content in from the
+                // trailing edge and retire the old toward the leading edge.
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .move(edge: .leading).combined(with: .opacity)
+                ))
             stepDots
         }
         .animation(.snappy, value: step)
@@ -70,7 +75,8 @@ struct OnboardingView: View {
         VStack(spacing: 14) {
             Spacer()
             Image(systemName: "checkmark.circle.fill").font(.system(size: 34))
-                .foregroundStyle(Color(red: 0.4, green: 0.85, blue: 0.5))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.jarvisSuccess)
             Text("You're all set").font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
             Text("Hover the notch and type, or hold Option to talk. Jarvis will ask before doing anything that changes your Mac.")
                 .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
@@ -89,7 +95,8 @@ struct OnboardingView: View {
                 Circle().fill(.white.opacity(s == step ? 0.9 : 0.25)).frame(width: 6, height: 6)
             }
         }
-        .padding(.bottom, 14)
+        .padding(.bottom, 16)
+        .accessibilityHidden(true)
     }
 
     private func advance() {
@@ -105,7 +112,7 @@ struct OnboardingView: View {
         Button(action: action) {
             Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                 .padding(.horizontal, 24).padding(.vertical, 10)
-                .background(Capsule().fill(Color(red: 0.3, green: 0.55, blue: 1.0)))
+                .background(Capsule().fill(Color.jarvisAccent))
         }
         .buttonStyle(.plain)
     }
@@ -149,7 +156,7 @@ private struct ProviderStep: View {
 
                 SecureField("Paste your API key", text: $apiKey).textFieldStyle(.roundedBorder)
 
-                if let error { Text(error).font(.system(size: 11)).foregroundStyle(.red) }
+                if let error { Text(error).font(.jarvisCaption).foregroundStyle(Color.jarvisError) }
 
                 HStack {
                     Button("Skip for now") { onContinue() }
@@ -162,7 +169,9 @@ private struct ProviderStep: View {
                     .disabled(apiKey.isEmpty || busy)
                 }
             } else {
-                Text("\(models.count) models available").font(.system(size: 11)).foregroundStyle(Color(red: 0.4, green: 0.85, blue: 0.5))
+                Text("\(models.count) models available")
+                    .font(.jarvisCaption).monospacedDigit()
+                    .foregroundStyle(Color.jarvisSuccess)
                 Menu {
                     ForEach(models) { model in
                         Button(model.displayName ?? model.id) { selectModel(model.id) }
@@ -176,7 +185,7 @@ private struct ProviderStep: View {
                     .font(.system(size: 13)).padding(10)
                     .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.08)))
                 }
-                .menuStyle(.borderlessButton)
+                .buttonStyle(.plain)
 
                 HStack {
                     Spacer()

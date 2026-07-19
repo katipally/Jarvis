@@ -112,6 +112,7 @@ final class VoiceController {
 
     private func sendAndAwaitAnswer(_ text: String) {
         guard let chat else { phase = .idle; return }
+        let draft = chat.input // never clobber a half-typed message
         chat.input = text
         chat.onRunComplete = { [weak self] in
             guard let self, self.phase == .processing else { return }
@@ -124,5 +125,8 @@ final class VoiceController {
             chat.onRunComplete = nil
         }
         chat.send()
+        if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            chat.input = draft
+        }
     }
 }

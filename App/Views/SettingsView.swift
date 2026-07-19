@@ -8,23 +8,40 @@ struct SettingsView: View {
     @State private var modelsByAccount: [String: [ProviderModel]] = [:]
     @State private var loadingModels: Set<String> = []
     @State private var showAddProvider = false
+    @State private var pendingDelete: ProviderAccount?
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 24) {
                 providersSection
                 rolesSection
                 PermissionsDashboard()
             }
-            .padding(.vertical, 14)
+            .padding(.vertical, 16)
         }
         .task { await refreshAllModels() }
+        .confirmationDialog(
+            "Remove \(pendingDelete.map { $0.label ?? $0.provider.capitalized } ?? "provider")?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let account = pendingDelete {
+                    Task { await core.deleteAccount(account); modelsByAccount[account.id] = nil }
+                }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        }
     }
 
     // MARK: - Providers
 
     private var providersSection: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: 12) {
             sectionHeader("Providers", trailing: showAddProvider ? "Cancel" : "Add provider") {
                 withAnimation(.snappy) { showAddProvider.toggle() }
             }
@@ -49,21 +66,24 @@ struct SettingsView: View {
 
     private func providerCard(_ account: ProviderAccount) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "key.fill").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+            Image(systemName: "key.fill").font(.jarvisCaption).foregroundStyle(.white.opacity(0.4))
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.label ?? account.provider.capitalized)
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                    .font(.jarvisRow.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
                 statusBadge(account)
             }
             Spacer()
             Button {
-                Task { await core.deleteAccount(account); modelsByAccount[account.id] = nil }
+                pendingDelete = account
             } label: {
-                Image(systemName: "trash").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                Image(systemName: "trash").font(.jarvisCaption).foregroundStyle(.white.opacity(0.4))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Remove \(account.label ?? account.provider.capitalized)")
         }
-        .padding(14)
+        .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.05)))
     }
 
@@ -71,28 +91,32 @@ struct SettingsView: View {
     private func statusBadge(_ account: ProviderAccount) -> some View {
         if loadingModels.contains(account.id) {
             Label("Checking key…", systemImage: "arrow.triangle.2.circlepath")
-                .font(.system(size: 10)).foregroundStyle(.white.opacity(0.45))
+                .symbolEffect(.rotate)
+                .font(.jarvisFootnote).foregroundStyle(.white.opacity(0.45))
         } else if let models = modelsByAccount[account.id] {
             if models.isEmpty {
                 Text("No models — check the key or base URL")
-                    .font(.system(size: 10)).foregroundStyle(Color(red: 1, green: 0.5, blue: 0.5))
+                    .font(.jarvisFootnote).foregroundStyle(Color.jarvisError)
             } else {
                 Text("\(models.count) models available")
-                    .font(.system(size: 10)).foregroundStyle(Color(red: 0.4, green: 0.85, blue: 0.5))
+                    .font(.jarvisFootnote).monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.snappy, value: models.count)
+                    .foregroundStyle(Color.jarvisSuccess)
             }
         } else {
             Text(account.baseUrl ?? ProviderPreset.defaultBaseURL(for: account.provider).absoluteString)
-                .font(.system(size: 10)).foregroundStyle(.white.opacity(0.35)).lineLimit(1)
+                .font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
         }
     }
 
     // MARK: - Roles
 
     private var rolesSection: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: 12) {
             sectionHeader("Models", trailing: nil, action: nil)
             Text("Route each kind of task to any provider and model.")
-                .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                .font(.jarvisCaption).foregroundStyle(.white.opacity(0.55))
                 .padding(.bottom, 2)
 
             if core.accounts.isEmpty {
@@ -108,18 +132,18 @@ struct SettingsView: View {
     private func roleCard(_ role: AgentRole) -> some View {
         let assignment = core.assignments[role]
         let accountID = assignment?.providerAccountId
-        return VStack(alignment: .leading, spacing: 9) {
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(role.label).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
-                    Text(role.detail).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                    Text(role.label).font(.jarvisRow.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
+                    Text(role.detail).font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55))
                 }
                 Spacer()
                 if role == .brain && assignment == nil {
                     Text("required").font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Color(red: 1, green: 0.75, blue: 0.3))
+                        .foregroundStyle(Color.jarvisWarning)
                         .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Capsule().fill(Color(red: 1, green: 0.75, blue: 0.3).opacity(0.15)))
+                        .background(Capsule().fill(Color.jarvisWarning.opacity(0.15)))
                 }
             }
 
@@ -134,7 +158,7 @@ struct SettingsView: View {
                     pickerLabel(core.account(id: accountID ?? "")?.label
                         ?? core.account(id: accountID ?? "")?.provider.capitalized ?? "Provider", placeholder: accountID == nil)
                 }
-                .menuStyle(.borderlessButton).fixedSize()
+                .buttonStyle(.plain).fixedSize()
 
                 Menu {
                     if let accountID, let models = modelsByAccount[accountID], !models.isEmpty {
@@ -149,7 +173,7 @@ struct SettingsView: View {
                 } label: {
                     pickerLabel(assignment?.modelId ?? "Model", placeholder: assignment?.modelId == nil)
                 }
-                .menuStyle(.borderlessButton)
+                .buttonStyle(.plain)
 
                 if loadingModels.contains(accountID ?? "") {
                     ProgressView().controlSize(.small)
@@ -160,7 +184,7 @@ struct SettingsView: View {
                 EffortPicker(core: core, role: role, assignment: assignment)
             }
         }
-        .padding(14)
+        .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.05)))
     }
 
@@ -168,8 +192,8 @@ struct SettingsView: View {
 
     private func pickerLabel(_ text: String, placeholder: Bool) -> some View {
         HStack(spacing: 4) {
-            Text(text).font(.system(size: 11, weight: placeholder ? .regular : .medium))
-                .foregroundStyle(placeholder ? .white.opacity(0.4) : .white.opacity(0.9)).lineLimit(1)
+            Text(text).font(.jarvisCaption.weight(placeholder ? .regular : .medium))
+                .foregroundStyle(placeholder ? .white.opacity(0.45) : .white.opacity(0.9)).lineLimit(1)
             Image(systemName: "chevron.up.chevron.down").font(.system(size: 8)).foregroundStyle(.white.opacity(0.4))
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -178,19 +202,19 @@ struct SettingsView: View {
 
     private func sectionHeader(_ title: String, trailing: String?, action: (() -> Void)?) -> some View {
         HStack {
-            Text(title.uppercased()).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.5)).tracking(0.5)
+            Text(title.uppercased()).font(.jarvisCaption.weight(.semibold)).foregroundStyle(.white.opacity(0.5)).tracking(0.5)
             Spacer()
             if let trailing, let action {
                 Button(trailing, action: action)
-                    .buttonStyle(.plain).font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color(red: 0.4, green: 0.7, blue: 1.0))
+                    .buttonStyle(.plain).font(.jarvisCaption.weight(.medium))
+                    .foregroundStyle(Color.jarvisLink)
             }
         }
     }
 
     private func emptyCard(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+            .font(.jarvisCaption).foregroundStyle(.white.opacity(0.55))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.03)))
@@ -239,7 +263,7 @@ private struct EffortPicker: View {
         Group {
             if supportsReasoning {
                 HStack(spacing: 6) {
-                    Text("Reasoning").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                    Text("Reasoning").font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55))
                     Menu {
                         Button("Off") { set(nil) }
                         ForEach(ReasoningEffort.allCases, id: \.self) { effort in
@@ -247,11 +271,11 @@ private struct EffortPicker: View {
                         }
                     } label: {
                         Text(assignment.reasoningEffort?.rawValue.capitalized ?? "Off")
-                            .font(.system(size: 10)).foregroundStyle(.white.opacity(0.7))
+                            .font(.jarvisFootnote).foregroundStyle(.white.opacity(0.7))
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(Capsule().fill(.white.opacity(0.08)))
                     }
-                    .menuStyle(.borderlessButton).fixedSize()
+                    .buttonStyle(.plain).fixedSize()
                 }
             }
         }
@@ -282,7 +306,7 @@ private struct AddProviderForm: View {
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 8) {
             Picker("Provider", selection: $provider) {
                 Text("Anthropic").tag(ProviderAccount.Provider.anthropic)
                 Text("OpenAI").tag(ProviderAccount.Provider.openai)
@@ -295,11 +319,11 @@ private struct AddProviderForm: View {
             }
 
             SecureField("API key", text: $apiKey).textFieldStyle(.roundedBorder)
-            TextField("Base URL", text: $baseURL).textFieldStyle(.roundedBorder).font(.system(size: 11))
+            TextField("Base URL", text: $baseURL).textFieldStyle(.roundedBorder).font(.jarvisCaption)
             TextField("Label (optional)", text: $label).textFieldStyle(.roundedBorder)
 
             if let error {
-                Text(error).font(.system(size: 10)).foregroundStyle(.red)
+                Text(error).font(.jarvisFootnote).foregroundStyle(Color.jarvisError)
             }
 
             HStack {
@@ -312,7 +336,7 @@ private struct AddProviderForm: View {
                 .disabled(apiKey.isEmpty || saving)
             }
         }
-        .padding(14)
+        .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.06)))
         .onAppear {
             if baseURL.isEmpty { baseURL = ProviderPreset.defaultBaseURL(for: provider.rawValue).absoluteString }

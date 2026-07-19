@@ -129,7 +129,7 @@ final class NotchScreenManager {
             // Close on the real visible region, not the (larger) fixed window.
             let zone = panel.vm.visibleRect(open: true).insetBy(dx: -36, dy: -36)
             if !zone.contains(pointer), panel.vm.canAutoClose {
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.9)) {
+                withAnimation(NotchAnimation.close) {
                     panel.vm.close()
                 }
             }

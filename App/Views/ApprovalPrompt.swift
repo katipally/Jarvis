@@ -11,52 +11,76 @@ struct ApprovalPrompt: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "hand.raised.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(red: 1.0, green: 0.8, blue: 0.3))
+                    .font(.jarvisCaption)
+                    .foregroundStyle(Color.jarvisWarning)
                 Text("Jarvis wants to")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.jarvisCaption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.6))
             }
             Text(request.summary)
-                .font(.system(size: 13, weight: .medium))
+                .font(.jarvisBody.weight(.medium))
                 .foregroundStyle(.white)
                 .lineLimit(3)
 
             HStack(spacing: 8) {
-                button("Deny", tint: .white.opacity(0.12), fg: .white.opacity(0.8)) {
+                ApprovalButton(title: "Deny", tint: .white.opacity(0.12), fg: .white.opacity(0.8), shortcut: .cancelAction) {
                     presenter.resolve(request, .deny(persist: false))
                 }
                 if request.scopeKey != nil {
-                    button("Always", tint: .white.opacity(0.12), fg: .white.opacity(0.8)) {
+                    ApprovalButton(title: "Always", tint: .white.opacity(0.12), fg: .white.opacity(0.8)) {
                         presenter.resolve(request, .allow(persist: true))
                     }
                 }
-                button("Approve", tint: Color(red: 0.3, green: 0.55, blue: 1.0), fg: .white) {
+                ApprovalButton(title: "Approve", tint: Color.jarvisAccent, fg: .white, shortcut: .defaultAction) {
                     presenter.resolve(request, .allow(persist: false))
                 }
             }
         }
-        .padding(14)
+        .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.black.opacity(0.85))
+                .fill(.regularMaterial)
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.15), lineWidth: 1))
         )
         .shadow(color: .black.opacity(0.5), radius: 12)
-        .padding(.horizontal, 14)
-        .padding(.bottom, 14)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+        .accessibilityAddTraits(.isModal)
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
+}
 
-    private func button(_ title: String, tint: Color, fg: Color, action: @escaping () -> Void) -> some View {
+private struct ApprovalButton: View {
+    let title: String
+    let tint: Color
+    let fg: Color
+    var shortcut: KeyboardShortcut? = nil
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.jarvisRow.weight(.semibold))
                 .foregroundStyle(fg)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(tint))
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(tint)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(.white.opacity(isHovering ? 0.08 : 0))
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
+        .keyboardShortcut(shortcut)
+        .pointerStyle(.link)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) { isHovering = hovering }
+        }
     }
 }
