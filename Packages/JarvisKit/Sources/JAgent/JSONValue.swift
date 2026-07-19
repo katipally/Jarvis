@@ -72,17 +72,12 @@ public extension JSONValue {
         }
     }
 
-    /// Serialize to a compact JSON string (stable-ish; used for tool_call.input_json).
+    /// Serialize to a compact JSON string (stable keys; used for tool_call.input_json).
     var jsonString: String {
-        guard JSONSerialization.isValidJSONObject(anyValue) || !(anyValue is [Any] || anyValue is [String: Any]) else {
-            return "{}"
-        }
-        let wrapped: Any = (anyValue is [Any] || anyValue is [String: Any]) ? anyValue : ["value": anyValue]
-        if let data = try? JSONSerialization.data(withJSONObject: anyValue, options: [.sortedKeys]),
+        if let data = try? JSONSerialization.data(withJSONObject: anyValue, options: [.sortedKeys, .fragmentsAllowed]),
            let s = String(data: data, encoding: .utf8) {
             return s
         }
-        _ = wrapped
         return "{}"
     }
 

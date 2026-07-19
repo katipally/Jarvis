@@ -81,14 +81,87 @@ struct FakeAdapter: ProviderAdapter {
     #expect(hasTool)
 }
 
-@Test func anthropicBodyEnablesThinkingForEffort() {
-    let req = ModelRequest(model: "claude", messages: [.user("hi")], maxTokens: 1000, reasoningEffort: .medium)
-    let body = AnthropicAdapter.buildBody(req)
+@Test func anthropicBodyUsesAdaptiveThinkingOnCurrentModels() {
+    let req = ModelRequest(model: "claude-opus-4-8", messages: [.user("hi")], maxTokens: 1000, reasoningEffort: .medium)
+    let body = AnthropicAdapter.buildBody(req, firstParty: true)
+    let thinking = body["thinking"] as? [String: Any]
+    #expect(thinking?["type"] as? String == "adaptive")
+    #expect(thinking?["budget_tokens"] == nil) // rejected with 400 on current models
+    let outputConfig = body["output_config"] as? [String: Any]
+    #expect(outputConfig?["effort"] as? String == "medium")
+    #expect((body["max_tokens"] as? Int ?? 0) >= 16_000) // thinking shares the budget
+    #expect(body["temperature"] == nil)
+    #expect((body["cache_control"] as? [String: Any])?["type"] as? String == "ephemeral")
+}
+
+@Test func anthropicBodyKeepsLegacyThinkingForCompatEndpoints() {
+    let req = ModelRequest(model: "MiniMax-M2", messages: [.user("hi")], maxTokens: 1000, reasoningEffort: .medium)
+    let body = AnthropicAdapter.buildBody(req, firstParty: false)
     let thinking = body["thinking"] as? [String: Any]
     #expect(thinking?["type"] as? String == "enabled")
-    // max_tokens must exceed the thinking budget.
     #expect((body["max_tokens"] as? Int ?? 0) > (thinking?["budget_tokens"] as? Int ?? 0))
-    #expect(body["temperature"] == nil)
+    #expect(body["cache_control"] == nil) // first-party-only field
+}
+
+@Test func anthropicReplaysSignedThinkingAndDropsUnsigned() {
+    let messages: [NeutralMessage] = [
+        .user("hi"),
+        NeutralMessage(role: .assistant, content: [
+            .thinking("signed reasoning", signature: "sigABC"),
+            .thinking("unsigned reasoning", signature: nil),
+            .thinking("foreign reasoning", signature: #"{"type":"reasoning"}"#),
+            .toolUse(id: "t1", name: "list_apps", input: .object([:])),
+        ]),
+        NeutralMessage(role: .user, content: [.toolResult(toolUseId: "t1", content: "ok", isError: false, images: [])]),
+    ]
+    let body = AnthropicAdapter.buildBody(ModelRequest(model: "claude-opus-4-8", messages: messages), firstParty: true)
+    let wire = body["messages"] as? [[String: Any]]
+    let assistant = wire?[1]["content"] as? [[String: Any]]
+    let thinkingBlocks = assistant?.filter { $0["type"] as? String == "thinking" }
+    #expect(thinkingBlocks?.count == 1) // only the natively signed block survives
+    #expect(thinkingBlocks?.first?["signature"] as? String == "sigABC")
+    // Signed thinking must precede its tool_use.
+    #expect(assistant?.last?["type"] as? String == "tool_use")
+}
+
+@Test func anthropicDropsEmptyMessagesAndEmptyTextBlocks() {
+    let messages: [NeutralMessage] = [
+        .user("hi"),
+        NeutralMessage(role: .assistant, content: [.text("")]), // empty turn must not reach the wire
+    ]
+    let body = AnthropicAdapter.buildBody(ModelRequest(model: "claude-opus-4-8", messages: messages), firstParty: true)
+    let wire = body["messages"] as? [[String: Any]]
+    #expect(wire?.count == 1)
+}
+
+@Test func assemblerPreservesInterleavedOrderAndSignature() {
+    var a = MessageAssembler()
+    a.appendThinking("think first")
+    a.attachThinkingSignature("sig1")
+    a.appendText("then speak")
+    a.startTool(id: "t1", name: "x")
+    a.appendToolInput(id: "t1", fragment: "{}")
+    a.endTool(id: "t1")
+    let msg = a.message()
+    guard msg.content.count == 3,
+          case .thinking(let t, let sig) = msg.content[0],
+          case .text(let text) = msg.content[1],
+          case .toolUse = msg.content[2]
+    else {
+        Issue.record("unexpected block layout: \(msg.content)")
+        return
+    }
+    #expect(t == "think first")
+    #expect(sig == "sig1")
+    #expect(text == "then speak")
+}
+
+@Test func assemblerFlagsMalformedToolInput() {
+    var a = MessageAssembler()
+    a.startTool(id: "t1", name: "x")
+    a.appendToolInput(id: "t1", fragment: #"{"truncated": "#) // cut off mid-JSON
+    _ = a.message()
+    #expect(a.malformedToolIDs.contains("t1"))
 }
 
 @Test func responsesBodyUsesReasoningEffort() {

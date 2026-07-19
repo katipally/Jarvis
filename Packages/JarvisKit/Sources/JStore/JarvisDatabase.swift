@@ -273,6 +273,12 @@ public final class JarvisDatabase: Sendable {
             try db.create(index: "nudge_on_created", on: "nudge", columns: ["created_at"])
         }
 
+        migrator.registerMigration("v6_hot_indexes") { db in
+            try db.create(index: "tool_call_on_run", on: "tool_call", columns: ["run_id"])
+            try db.create(index: "run_on_started", on: "run", columns: ["started_at"])
+            try db.create(index: "approval_event_on_created", on: "approval_event", columns: ["created_at"])
+        }
+
         return migrator
     }
 }

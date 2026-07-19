@@ -154,9 +154,13 @@ final class NotchViewModel {
         openedAt = nil
     }
 
+    /// True while something must stay on screen regardless of the pointer
+    /// (a pending approval prompt). Set by the view layer.
+    var holdOpen = false
+
     /// Grace period so the panel can't slam shut right after opening.
     var canAutoClose: Bool {
-        guard state == .open else { return false }
+        guard state == .open, !holdOpen else { return false }
         guard let openedAt else { return true }
         return Date.now.timeIntervalSince(openedAt) > 0.6
     }

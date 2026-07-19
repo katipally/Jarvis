@@ -43,9 +43,9 @@ public actor ComputerUseRuntime {
 
     // MARK: - Snapshot
 
-    public func snapshot(app: String?) throws -> UISnapshot {
+    public func snapshot(app: String?) async throws -> UISnapshot {
         guard AXIsProcessTrusted() else { throw ControlError.accessibilityDenied }
-        let target = try resolveTarget(app: app)
+        let target = try await resolveTarget(app: app)
         currentTarget = target
         records = [:]
 
@@ -112,25 +112,25 @@ public actor ComputerUseRuntime {
         // Fallback: focus, select-all, retype.
         AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         try? await Task.sleep(nanoseconds: 40_000_000)
-        try BackgroundInput.pressKey(pid: target.pid, combo: "command+a")
+        try await BackgroundInput.pressKey(pid: target.pid, combo: "command+a")
         try? await Task.sleep(nanoseconds: 20_000_000)
-        try BackgroundInput.typeText(pid: target.pid, text: value)
+        try await BackgroundInput.typeText(pid: target.pid, text: value)
         return "Typed “\(value)” into {e\(ref)}."
     }
 
-    public func type(text: String) throws -> String {
+    public func type(text: String) async throws -> String {
         guard let target = currentTarget else { throw ControlError.actionFailed("Take a ui_snapshot first.") }
-        try BackgroundInput.typeText(pid: target.pid, text: text)
+        try await BackgroundInput.typeText(pid: target.pid, text: text)
         return "Typed \(text.count) characters."
     }
 
-    public func pressKey(combo: String) throws -> String {
+    public func pressKey(combo: String) async throws -> String {
         guard let target = currentTarget else { throw ControlError.actionFailed("Take a ui_snapshot first.") }
-        try BackgroundInput.pressKey(pid: target.pid, combo: combo)
+        try await BackgroundInput.pressKey(pid: target.pid, combo: combo)
         return "Pressed \(combo)."
     }
 
-    public func scroll(ref: Int?, deltaX: Int, deltaY: Int) throws -> String {
+    public func scroll(ref: Int?, deltaX: Int, deltaY: Int) async throws -> String {
         guard let target = currentTarget else { throw ControlError.actionFailed("Take a ui_snapshot first.") }
         let point: CGPoint
         if let ref, let element = records[ref], let frame = axFrame(element) {
@@ -144,12 +144,12 @@ public actor ComputerUseRuntime {
 
     // MARK: - Target resolution
 
-    private func resolveTarget(app: String?) throws -> Target {
+    private func resolveTarget(app: String?) async throws -> Target {
         let running = try resolveApp(app)
         let pid = running.processIdentifier
         let axApp = AXUIElementCreateApplication(pid)
         if enableEnhanced(axApp: axApp, pid: pid) {
-            Thread.sleep(forTimeInterval: 0.35) // Chromium/Electron build the tree lazily.
+            try? await Task.sleep(for: .milliseconds(350)) // Chromium/Electron build the tree lazily.
         }
         guard let window = firstWindow(axApp: axApp) else {
             throw ControlError.noWindow(running.localizedName ?? app ?? "app")

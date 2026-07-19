@@ -35,11 +35,18 @@ actor SessionManager {
         }
     }
 
+    struct TurnContext: Sendable {
+        let segmentID: String
+        /// True when this turn opened a fresh segment (the previous conversation
+        /// closed) — the caller should reset its in-memory transcript.
+        let startedNewSegment: Bool
+    }
+
     /// Returns the segment a new user turn belongs to, splitting if we've been idle.
-    func beginUserTurn(now: Date = .now) async throws -> String {
+    func beginUserTurn(now: Date = .now) async throws -> TurnContext {
         if let segmentID, now.timeIntervalSince(lastActivity) <= idleGap {
             lastActivity = now
-            return segmentID
+            return TurnContext(segmentID: segmentID, startedNewSegment: false)
         }
         if let segmentID {
             try await closeSegment(segmentID, reason: .idle, at: lastActivity)
@@ -47,7 +54,36 @@ actor SessionManager {
         let newSegment = try await openSegment(now: now)
         segmentID = newSegment
         lastActivity = now
-        return newSegment
+        return TurnContext(segmentID: newSegment, startedNewSegment: true)
+    }
+
+    /// Close any segments a previous process left open (crash / quit) and re-fire
+    /// extraction for closed segments whose extraction never ran. Call once at
+    /// launch, after wiring `onSegmentClose`.
+    func recoverOrphanedSegments(now: Date = .now) async {
+        let pendingIDs: [String] = (try? await database.writer.write { db in
+            let open = try Segment.filter(Column("ended_at") == nil).fetchAll(db)
+            for var segment in open {
+                segment.endedAt = now
+                segment.closeReason = Segment.CloseReason.shutdown.rawValue
+                try segment.update(db)
+            }
+            let stalled = try Segment
+                .filter(Column("ended_at") != nil)
+                .filter(["pending", "running"].contains(Column("extraction_status")))
+                .fetchAll(db)
+            return (open + stalled).map(\.id)
+        }) ?? []
+        for id in Set(pendingIDs) {
+            onSegmentClose?(id)
+        }
+    }
+
+    /// Best-effort close of the live segment on app termination.
+    func closeCurrentSegment(now: Date = .now) async {
+        guard let segmentID else { return }
+        try? await closeSegment(segmentID, reason: .shutdown, at: now)
+        self.segmentID = nil
     }
 
     private func openSegment(now: Date) async throws -> String {

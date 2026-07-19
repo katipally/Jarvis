@@ -3,17 +3,28 @@ import Foundation
 import Speech
 
 /// On-device streaming transcription via macOS 26 SpeechAnalyzer + SpeechTranscriber.
-/// Audio callbacks run on a realtime thread; state is confined accordingly.
+/// Audio callbacks run on a realtime thread; the tap closure captures everything it
+/// needs as locals so it never races `stop()`, and cross-thread text goes through a lock.
 public final class SpeechAnalyzerEngine: TranscriberEngine, @unchecked Sendable {
     private let engine = AVAudioEngine()
     private var transcriber: SpeechTranscriber?
     private var analyzer: SpeechAnalyzer?
     private var inputBuilder: AsyncStream<AnalyzerInput>.Continuation?
-    private var analyzerFormat: AVAudioFormat?
-    private var converter: AVAudioConverter?
     private var resultsTask: Task<Void, Never>?
     private var eventContinuation: AsyncStream<TranscriptEvent>.Continuation?
-    private var finalizedText = ""
+
+    private let textLock = NSLock()
+    private var _finalizedText = ""
+    private var finalizedText: String {
+        get { textLock.withLock { _finalizedText } }
+        set { textLock.withLock { _finalizedText = newValue } }
+    }
+    private func appendFinalized(_ text: String) -> String {
+        textLock.withLock {
+            _finalizedText += text
+            return _finalizedText
+        }
+    }
 
     public init() {}
 
@@ -28,29 +39,22 @@ public final class SpeechAnalyzerEngine: TranscriberEngine, @unchecked Sendable 
             reportingOptions: [.volatileResults],
             attributeOptions: []
         )
-        self.transcriber = transcriber
         try await ensureModel(for: transcriber, locale: locale)
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
-        self.analyzer = analyzer
-        self.analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+        let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
 
         let (inputSequence, inputBuilder) = AsyncStream<AnalyzerInput>.makeStream()
-        self.inputBuilder = inputBuilder
-
         let (events, eventContinuation) = AsyncStream<TranscriptEvent>.makeStream()
-        self.eventContinuation = eventContinuation
         finalizedText = ""
 
-        resultsTask = Task { [weak self] in
-            guard let transcriber = self?.transcriber else { return }
+        let resultsTask = Task { [weak self] in
             do {
                 for try await result in transcriber.results {
                     guard let self else { return }
                     let text = String(result.text.characters)
                     if result.isFinal {
-                        self.finalizedText += text
-                        eventContinuation.yield(.final(self.finalizedText))
+                        eventContinuation.yield(.final(self.appendFinalized(text)))
                     } else {
                         eventContinuation.yield(.partial(text))
                     }
@@ -60,31 +64,52 @@ public final class SpeechAnalyzerEngine: TranscriberEngine, @unchecked Sendable 
             }
         }
 
-        try await analyzer.start(inputSequence: inputSequence)
-
-        let input = engine.inputNode
-        let inputFormat = input.outputFormat(forBus: 0)
-        if let analyzerFormat, inputFormat != analyzerFormat {
-            converter = AVAudioConverter(from: inputFormat, to: analyzerFormat)
+        // From here on, any failure must tear down what was started so a retry
+        // begins clean (analyzer, results task, tap, streams).
+        func teardown() async {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            inputBuilder.finish()
+            resultsTask.cancel()
+            eventContinuation.finish()
+            try? await analyzer.finalizeAndFinishThroughEndOfInput()
         }
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-            guard let self else { return }
-            eventContinuation.yield(.level(Self.rms(buffer)))
-            if let converted = self.convert(buffer) {
-                self.inputBuilder?.yield(AnalyzerInput(buffer: converted))
-            } else {
-                self.inputBuilder?.yield(AnalyzerInput(buffer: buffer))
-            }
-        }
-
-        engine.prepare()
         do {
+            try await analyzer.start(inputSequence: inputSequence)
+
+            let input = engine.inputNode
+            let inputFormat = input.outputFormat(forBus: 0)
+            var converter: AVAudioConverter?
+            if let analyzerFormat, inputFormat != analyzerFormat {
+                converter = AVAudioConverter(from: inputFormat, to: analyzerFormat)
+            }
+
+            // The tap runs on a realtime thread: capture locals only, never self.
+            let tapConverter = converter
+            let tapFormat = analyzerFormat
+            input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+                eventContinuation.yield(.level(Self.rms(buffer)))
+                if let tapConverter, let tapFormat,
+                   let converted = Self.convert(buffer, using: tapConverter, to: tapFormat) {
+                    inputBuilder.yield(AnalyzerInput(buffer: converted))
+                } else {
+                    inputBuilder.yield(AnalyzerInput(buffer: buffer))
+                }
+            }
+
+            engine.prepare()
             try engine.start()
         } catch {
+            await teardown()
             throw SpeechError.engineFailed(error.localizedDescription)
         }
 
+        self.transcriber = transcriber
+        self.analyzer = analyzer
+        self.inputBuilder = inputBuilder
+        self.resultsTask = resultsTask
+        self.eventContinuation = eventContinuation
         return events
     }
 
@@ -99,16 +124,22 @@ public final class SpeechAnalyzerEngine: TranscriberEngine, @unchecked Sendable 
         let text = finalizedText
         transcriber = nil
         analyzer = nil
+        inputBuilder = nil
+        resultsTask = nil
+        eventContinuation = nil
         return text
     }
 
     // MARK: - Audio
 
-    private func convert(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        guard let converter, let analyzerFormat else { return nil }
-        let ratio = analyzerFormat.sampleRate / buffer.format.sampleRate
+    private static func convert(
+        _ buffer: AVAudioPCMBuffer,
+        using converter: AVAudioConverter,
+        to format: AVAudioFormat
+    ) -> AVAudioPCMBuffer? {
+        let ratio = format.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
-        guard let output = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: capacity) else { return nil }
+        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
         var error: NSError?
         let flag = ConsumeFlag()
         converter.convert(to: output, error: &error) { _, status in

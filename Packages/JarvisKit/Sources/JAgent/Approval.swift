@@ -45,19 +45,23 @@ public protocol ApprovalRuleStore: Sendable {
 public actor ApprovalGate {
     private let store: any ApprovalRuleStore
     private let present: @Sendable (ApprovalRequest) -> Void
+    private let dismiss: @Sendable (String) -> Void
     private let timeout: Duration
 
     private var pending: [String: CheckedContinuation<ApprovalDecision, Never>] = [:]
-    private var resolved: Set<String> = []
+    private var timedOut: Set<String> = []
+    private var timeoutTasks: [String: Task<Void, Never>] = [:]
 
     public init(
         store: any ApprovalRuleStore,
         timeout: Duration = .seconds(120),
-        present: @escaping @Sendable (ApprovalRequest) -> Void
+        present: @escaping @Sendable (ApprovalRequest) -> Void,
+        dismiss: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.store = store
         self.timeout = timeout
         self.present = present
+        self.dismiss = dismiss
     }
 
     public func decide(_ request: ApprovalRequest, tier: RiskTier, isBackground: Bool) async -> (ApprovalDecision, ApprovalDecider) {
@@ -88,7 +92,7 @@ public actor ApprovalGate {
             allowed = false
             if persist { await store.rememberRule(tool: request.toolName, scopeKey: request.scopeKey, allow: false) }
         }
-        let decider: ApprovalDecider = resolved.contains("timeout:" + request.id) ? .timeout : .user
+        let decider: ApprovalDecider = timedOut.remove(request.id) != nil ? .timeout : .user
         await store.logDecision(request: request, allowed: allowed, by: decider)
         return (decision, decider)
     }
@@ -96,32 +100,45 @@ public actor ApprovalGate {
     /// Called by the UI when the user taps Approve / Always / Deny.
     public func resolve(_ id: String, _ decision: ApprovalDecision) {
         guard let continuation = pending.removeValue(forKey: id) else { return }
-        resolved.insert(id)
+        clearTimeout(id)
         continuation.resume(returning: decision)
     }
 
     /// Fail closed if the run is cancelled while a prompt is outstanding.
     public func cancel(_ id: String) {
         guard let continuation = pending.removeValue(forKey: id) else { return }
+        clearTimeout(id)
+        dismiss(id)
         continuation.resume(returning: .deny(persist: false))
     }
 
     public func cancelAll() {
-        for (_, continuation) in pending { continuation.resume(returning: .deny(persist: false)) }
+        for (id, continuation) in pending {
+            clearTimeout(id)
+            dismiss(id)
+            continuation.resume(returning: .deny(persist: false))
+        }
         pending.removeAll()
     }
 
     private func scheduleTimeout(_ id: String) {
         let timeout = self.timeout
-        Task { [weak self] in
+        timeoutTasks[id] = Task { [weak self] in
             try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
             await self?.fireTimeout(id)
         }
     }
 
+    private func clearTimeout(_ id: String) {
+        timeoutTasks.removeValue(forKey: id)?.cancel()
+    }
+
     private func fireTimeout(_ id: String) {
+        timeoutTasks.removeValue(forKey: id)
         guard let continuation = pending.removeValue(forKey: id) else { return }
-        resolved.insert("timeout:" + id)
+        timedOut.insert(id)
+        dismiss(id) // remove the stale card from the notch
         continuation.resume(returning: .deny(persist: false))
     }
 }

@@ -5,7 +5,9 @@ import JStore
 
 /// Passive screen buffer: captures the frontmost window on a real app switch or
 /// a periodic tick, dedups near-identical frames, and sweeps on a 72h TTL / 1GB
-/// ceiling. Frames are NEVER auto-fed to a model — the agent pulls them via tools.
+/// ceiling. Frames reach a model only via agent tools — with one documented
+/// exception: the proactivity context-switch evaluation sends the single switch
+/// frame to the user-configured aux model (see ProactivityService).
 public final class ScreenBuffer: @unchecked Sendable {
     private let database: JarvisDatabase
     private let framesDir: URL
@@ -40,6 +42,9 @@ public final class ScreenBuffer: @unchecked Sendable {
     public func start() {
         guard task == nil else { return }
         task = Task { [weak self] in
+            // TTL must hold even if Screen Recording was later revoked (tick
+            // bails early in that case), so sweep unconditionally on start.
+            await self?.sweep()
             while !Task.isCancelled {
                 await self?.tick()
                 try? await Task.sleep(for: .seconds(5))
@@ -84,8 +89,9 @@ public final class ScreenBuffer: @unchecked Sendable {
     /// On-demand capture for the take_screenshot tool. Stores + returns the frame.
     @discardableResult
     public func captureNow() async throws -> CapturedFrame {
+        guard ScreenCapture.hasPermission else { throw ScreenError.permissionDenied }
         guard let frame = try await ScreenCapture.captureFrontWindow() else {
-            throw ScreenError.permissionDenied
+            throw ScreenError.noWindow
         }
         await store(frame, trigger: "on_demand")
         return frame

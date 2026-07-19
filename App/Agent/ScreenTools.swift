@@ -14,8 +14,8 @@ enum ScreenTools {
         ToolSpec(
             name: "recall_screen",
             description: "List recently captured screen frames (what was on the user's screen) with their ids, so you can understand past context. Pass ids to fetch_frames to actually see them.",
-            parameters: obj([("hours", "How many hours back (default 24)"), ("app", "Filter by app name (optional)")], required: []),
-            tier: .readOnly
+            parameters: obj([pInt("hours", "How many hours back to look (default 24, max 72)"), p("app", "Filter by app name, e.g. Safari")], required: []),
+            tier: .readOnly, sensitive: true
         ) { input, _ in
             let metas = await recall.recent(hours: int(input, "hours") ?? 24, app: str(input, "app"))
             if metas.isEmpty { return ToolOutput("No screen frames captured in that range.") }
@@ -31,8 +31,8 @@ enum ScreenTools {
         ToolSpec(
             name: "fetch_frames",
             description: "Load up to 5 screen frames by id (from recall_screen) so you can see what was on screen.",
-            parameters: obj([("ids", "Comma-separated frame ids")], required: ["ids"]),
-            tier: .readOnly
+            parameters: obj([p("ids", "Comma- or space-separated frame ids from recall_screen")], required: ["ids"]),
+            tier: .readOnly, sensitive: true
         ) { input, _ in
             guard let raw = str(input, "ids") else { return ToolOutput("Missing 'ids'.", isError: true) }
             let ids = raw.split(whereSeparator: { $0 == "," || $0 == " " }).map(String.init)
@@ -50,7 +50,7 @@ enum ScreenTools {
             name: "take_screenshot",
             description: "Capture the current screen right now to see what the user is looking at.",
             parameters: obj([], required: []),
-            tier: .readOnly
+            tier: .readOnly, sensitive: true
         ) { _, _ in
             if !ScreenCapture.hasPermission {
                 ScreenCapture.requestPermission()

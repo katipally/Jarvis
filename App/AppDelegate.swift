@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var memoryStore: MemoryStore?
     private var memoryService: MemoryService?
     private var proactivity: ProactivityService?
+    private var sessions: SessionManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -28,13 +29,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
             let core = JarvisCore(database: database, cacheDirectory: cacheDir)
             let sessions = SessionManager(database: database)
-            let agent = AgentServices(database: database, supportDirectory: appSupport)
+            let memoryStore = MemoryStore(database: database)
+            let agent = AgentServices(database: database, supportDirectory: appSupport, memoryStore: memoryStore)
             let chat = ChatStore(core: core, sessions: sessions, agent: agent)
             let voice = VoiceController(chat: chat)
             let pushToTalk = PushToTalkMonitor(voice: voice)
 
             // Memory: extraction on segment close + retrieval injection.
-            let memoryStore = MemoryStore(database: database)
             let memoryService = MemoryService(core: core, sessions: sessions, store: memoryStore)
             chat.memory = memoryService
             chat.graphReader = GraphReader(database: database)
@@ -46,10 +47,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.voice = voice
             self.pushToTalk = pushToTalk
 
+            self.sessions = sessions
             Task {
                 await sessions.setOnSegmentClose { segmentID in
                     Task { @MainActor in await memoryService.extract(segmentID: segmentID) }
                 }
+                // Segments a previous process left open (quit/crash) must close
+                // now, or their memory extraction never runs.
+                await sessions.recoverOrphanedSegments()
             }
 
             // Proactivity: context-switch nudges + heartbeat + cron.
@@ -78,6 +83,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         screenManager.stop()
+        // Best-effort: mark the live segment closed so history is truthful.
+        // Extraction for it runs on next launch via recoverOrphanedSegments.
+        if let sessions {
+            let semaphore = DispatchSemaphore(value: 0)
+            Task.detached {
+                await sessions.closeCurrentSegment()
+                semaphore.signal()
+            }
+            _ = semaphore.wait(timeout: .now() + 1)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

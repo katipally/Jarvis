@@ -20,4 +20,10 @@ final class ApprovalPresenter {
         let gate = gate
         Task { await gate?.resolve(request.id, decision) }
     }
+
+    /// Gate-initiated removal (timeout / run cancelled) — the card must never
+    /// outlive its continuation, or its buttons resolve nothing.
+    func dismiss(_ id: String) {
+        queue.removeAll { $0.id == id }
+    }
 }

@@ -14,10 +14,22 @@ final class NotchScreenManager {
     private var screenObserver: NSObjectProtocol?
     private var rebuildTask: Task<Void, Never>?
     private var mouseMonitors: [Any] = []
-    private var lastPointerCheck = Date.distantPast
     private var core: JarvisCore?
     private var chat: ChatStore?
     private var voice: VoiceController?
+
+    /// Lock-free-enough throttle usable from the monitor callback thread.
+    private final class PointerThrottle: @unchecked Sendable {
+        private let lock = NSLock()
+        private var last = Date.distantPast
+        func shouldFire() -> Bool {
+            lock.withLock {
+                guard Date.now.timeIntervalSince(last) > 0.08 else { return false }
+                last = .now
+                return true
+            }
+        }
+    }
 
     func start(core: JarvisCore, chat: ChatStore, voice: VoiceController) {
         self.core = core
@@ -34,8 +46,11 @@ final class NotchScreenManager {
         }
 
         // SwiftUI onHover can miss exit events during animated resizes, so the
-        // real pointer position is the authoritative close signal.
+        // real pointer position is the authoritative close signal. Throttle
+        // before the actor hop — this fires for every pointer move on screen.
+        let throttle = PointerThrottle()
         if let global = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved, handler: { [weak self] _ in
+            guard throttle.shouldFire() else { return }
             Task { @MainActor in self?.pointerMoved() }
         }) {
             mouseMonitors.append(global)
@@ -49,6 +64,7 @@ final class NotchScreenManager {
     }
 
     func stop() {
+        rebuildTask?.cancel()
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
         }
@@ -108,10 +124,6 @@ final class NotchScreenManager {
     }
 
     private func pointerMoved() {
-        let now = Date.now
-        guard now.timeIntervalSince(lastPointerCheck) > 0.08 else { return }
-        lastPointerCheck = now
-
         let pointer = NSEvent.mouseLocation
         for (_, panel) in panels where panel.vm.state == .open {
             // Close on the real visible region, not the (larger) fixed window.

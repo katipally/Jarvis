@@ -36,6 +36,9 @@ public struct ToolSpec: Sendable {
     public let description: String
     public let parameters: JSONValue
     public let tier: RiskTier
+    /// Read-only tools that expose private user content (clipboard, screen
+    /// pixels, app UI text). Excluded from unattended background runs.
+    public let sensitive: Bool
     public let scopeKey: (@Sendable (JSONValue) -> String?)?
     public let summarize: (@Sendable (JSONValue) -> String)?
     public let run: @Sendable (JSONValue, ToolContext) async throws -> ToolOutput
@@ -45,6 +48,7 @@ public struct ToolSpec: Sendable {
         description: String,
         parameters: JSONValue,
         tier: RiskTier,
+        sensitive: Bool = false,
         scopeKey: (@Sendable (JSONValue) -> String?)? = nil,
         summarize: (@Sendable (JSONValue) -> String)? = nil,
         run: @escaping @Sendable (JSONValue, ToolContext) async throws -> ToolOutput
@@ -53,6 +57,7 @@ public struct ToolSpec: Sendable {
         self.description = description
         self.parameters = parameters
         self.tier = tier
+        self.sensitive = sensitive
         self.scopeKey = scopeKey
         self.summarize = summarize
         self.run = run
@@ -78,7 +83,9 @@ public struct ToolRegistry: Sendable {
 
     public var isEmpty: Bool { tools.isEmpty }
 
+    /// The registry an unattended background run may hold: read-only tools that
+    /// don't expose private user content (no clipboard, no screen, no app UI).
     public func readOnlyOnly() -> ToolRegistry {
-        ToolRegistry(tools.values.filter { $0.tier == .readOnly })
+        ToolRegistry(tools.values.filter { $0.tier == .readOnly && !$0.sensitive })
     }
 }

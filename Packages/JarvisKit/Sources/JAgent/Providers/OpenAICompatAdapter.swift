@@ -170,14 +170,24 @@ public struct OpenAICompatAdapter: ProviderAdapter {
         case .user: "user"
         }
 
-        // Each tool_result becomes a separate role:tool message.
-        let toolResults = message.content.compactMap { block -> [String: Any]? in
-            if case .toolResult(let toolUseId, let content, _, _) = block {
-                return ["role": "tool", "tool_call_id": toolUseId, "content": content]
+        // Each tool_result becomes a separate role:tool message; any images ride
+        // in a follow-up user message (role:tool content is text-only).
+        var toolResults: [[String: Any]] = []
+        var resultImages: [ImageSource] = []
+        for block in message.content {
+            if case .toolResult(let toolUseId, let content, _, let images) = block {
+                toolResults.append(["role": "tool", "tool_call_id": toolUseId, "content": content])
+                resultImages.append(contentsOf: images)
             }
-            return nil
         }
-        if !toolResults.isEmpty { return toolResults }
+        if !toolResults.isEmpty {
+            if !resultImages.isEmpty {
+                let parts: [[String: Any]] = [["type": "text", "text": "Images returned by the tool call(s) above:"]]
+                    + resultImages.map { ["type": "image_url", "image_url": ["url": $0.dataURL]] }
+                toolResults.append(["role": "user", "content": parts])
+            }
+            return toolResults
+        }
 
         // Assistant tool calls.
         let toolCalls = message.content.compactMap { block -> [String: Any]? in
@@ -203,6 +213,8 @@ public struct OpenAICompatAdapter: ProviderAdapter {
             return [["role": role, "content": parts]]
         }
 
+        // Some servers reject messages with empty content.
+        guard !message.plainText.isEmpty else { return [] }
         return [["role": role, "content": message.plainText]]
     }
 

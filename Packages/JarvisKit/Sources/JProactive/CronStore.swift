@@ -23,17 +23,20 @@ public struct CronStore: Sendable {
     }
 
     public func markRan(id: String, status: String, now: Date = .now) async {
-        _ = try? await database.writer.write { db in
-            guard var job = try CronJobRow.fetchOne(db, key: id) else { return }
-            job.lastRunAt = now
-            job.lastStatus = status
-            if let schedule = CronSchedule(job.cronExpr), let next = schedule.nextFire(after: now) {
-                job.nextRunAt = next
-            } else {
-                job.enabled = false
-            }
-            try job.update(db)
+        // nextFire can walk minute-by-minute over 400 days for a never-matching
+        // expression — compute it outside the write transaction.
+        guard let job = try? await database.reader.read({ db in try CronJobRow.fetchOne(db, key: id) }),
+              var updated = job as CronJobRow?
+        else { return }
+        updated.lastRunAt = now
+        updated.lastStatus = status
+        if let schedule = CronSchedule(updated.cronExpr), let next = schedule.nextFire(after: now) {
+            updated.nextRunAt = next
+        } else {
+            updated.enabled = false
         }
+        let final = updated
+        _ = try? await database.writer.write { db in try final.update(db) }
     }
 
     public func list() async -> [CronJobRow] {

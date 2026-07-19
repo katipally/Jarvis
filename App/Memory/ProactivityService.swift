@@ -18,8 +18,10 @@ final class ProactivityService {
     private var heartbeatTask: Task<Void, Never>?
     private var lastEval = Date.distantPast
 
-    // Daily token budget for all proactive/background spend.
-    private let dailyTokenLimit = 60_000
+    // Daily token budget (input + output) for all proactive/background spend.
+    // ponytail: in-memory counter, resets on relaunch; persist to heartbeat_state
+    // if restart-abuse ever matters.
+    private let dailyTokenLimit = 200_000
     private var budgetSpent = 0
     private var budgetDay = Calendar.current.startOfDay(for: .now)
 
@@ -81,7 +83,7 @@ final class ProactivityService {
             maxTokens: 300
         )
         let (text, usage) = await collect(resolved.adapter, request)
-        addBudget(usage.outputTokens)
+        addBudget(usage.inputTokens + usage.outputTokens)
 
         let decision = parseDecision(text)
         guard decision.nudge, !decision.message.isEmpty else { return }
@@ -95,7 +97,7 @@ final class ProactivityService {
         guard hasBudget() else { return }
         for job in await agent.cronStore.dueJobs() {
             let (text, usage) = await runBackground(prompt: job.prompt)
-            addBudget(usage.outputTokens)
+            addBudget(usage.inputTokens + usage.outputTokens)
             await agent.cronStore.markRan(id: job.id, status: text.isEmpty ? "empty" : "done")
             await deliver(body: text, trigger: "cron", dedupKey: "cron:\(job.id)", frameID: nil)
         }
@@ -112,7 +114,7 @@ final class ProactivityService {
         with exactly: NOTHING.
         """
         let (text, usage) = await runBackground(prompt: prompt)
-        addBudget(usage.outputTokens)
+        addBudget(usage.inputTokens + usage.outputTokens)
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         await agent.cronStore.setHeartbeatRun(.now, result: trimmed.isEmpty ? "nothing" : "nudged")
         guard !trimmed.isEmpty, !trimmed.uppercased().hasPrefix("NOTHING"), trimmed.count > 4 else { return }

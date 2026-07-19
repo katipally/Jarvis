@@ -3,7 +3,8 @@ import Foundation
 public enum ReasoningEffort: String, Sendable, Codable, CaseIterable {
     case minimal, low, medium, high, xhigh
 
-    /// Anthropic extended-thinking token budget for this effort level.
+    /// Anthropic extended-thinking token budget for this effort level
+    /// (legacy models / compatible endpoints only).
     var anthropicBudget: Int {
         switch self {
         case .minimal: 1024
@@ -11,6 +12,17 @@ public enum ReasoningEffort: String, Sendable, Codable, CaseIterable {
         case .medium: 8192
         case .high: 16000
         case .xhigh: 32000
+        }
+    }
+
+    /// `output_config.effort` value for current Anthropic models
+    /// (adaptive thinking). Anthropic has no "minimal" level.
+    var anthropicEffort: String {
+        switch self {
+        case .minimal, .low: "low"
+        case .medium: "medium"
+        case .high: "high"
+        case .xhigh: "xhigh"
         }
     }
 }
@@ -68,13 +80,16 @@ public struct Usage: Sendable, Equatable {
 }
 
 public enum StopReason: String, Sendable, Equatable {
-    case endTurn, toolUse, maxTokens, stopSequence, refusal, other
+    case endTurn, toolUse, maxTokens, maxTurns, stopSequence, refusal, other
 }
 
 /// The provider-neutral streaming vocabulary. Every adapter emits only these.
 public enum ModelStreamEvent: Sendable, Equatable {
     case textDelta(String)
     case thinkingDelta(String)
+    /// Opaque replay token for the current thinking block (signature /
+    /// encrypted reasoning item). Attached to the block, never shown.
+    case thinkingSignature(String)
     case toolUseStart(id: String, name: String)
     case toolInputDelta(id: String, jsonFragment: String)
     case toolUseEnd(id: String)

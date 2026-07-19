@@ -87,9 +87,18 @@ public struct OpenAIResponsesAdapter: ProviderAdapter {
             }
 
         case "response.output_item.done":
-            if let item = obj["item"] as? [String: Any], item["type"] as? String == "function_call",
-               let itemID = item["id"] as? String, let callID = state.callIDByItemID[itemID] {
-                continuation.yield(.toolUseEnd(id: callID))
+            if let item = obj["item"] as? [String: Any] {
+                if item["type"] as? String == "function_call",
+                   let itemID = item["id"] as? String, let callID = state.callIDByItemID[itemID] {
+                    continuation.yield(.toolUseEnd(id: callID))
+                } else if item["type"] as? String == "reasoning" {
+                    // Preserve the full reasoning item (encrypted content) so it
+                    // can be replayed before its function_call on the next turn.
+                    if let data = try? JSONSerialization.data(withJSONObject: item),
+                       let json = String(data: data, encoding: .utf8) {
+                        continuation.yield(.thinkingSignature(json))
+                    }
+                }
             }
 
         case "response.completed":
@@ -100,6 +109,15 @@ public struct OpenAIResponsesAdapter: ProviderAdapter {
                 continuation.yield(.usage(Usage(inputTokens: input, outputTokens: output)))
             }
             continuation.yield(.stop(state.sawToolCall ? .toolUse : .endTurn))
+
+        case "response.incomplete":
+            if let response = obj["response"] as? [String: Any],
+               let usage = response["usage"] as? [String: Any] {
+                let input = usage["input_tokens"] as? Int ?? 0
+                let output = usage["output_tokens"] as? Int ?? 0
+                continuation.yield(.usage(Usage(inputTokens: input, outputTokens: output)))
+            }
+            continuation.yield(.stop(.maxTokens))
 
         case "response.failed", "error":
             let message = ((obj["response"] as? [String: Any])?["error"] as? [String: Any])?["message"] as? String
@@ -119,13 +137,18 @@ public struct OpenAIResponsesAdapter: ProviderAdapter {
             "model": req.model,
             "stream": true,
             "input": req.messages.flatMap(inputItems),
-            "max_output_tokens": max(req.maxTokens, 4096),
+            // Reasoning shares the output budget; leave headroom for it.
+            "max_output_tokens": req.reasoningEffort != nil ? max(req.maxTokens, 16_000) : req.maxTokens,
         ]
         if let system = req.system, !system.isEmpty {
             body["instructions"] = system
         }
         if let effort = req.reasoningEffort {
             body["reasoning"] = ["effort": effort.rawValue, "summary": "auto"]
+            // Stateless replay: reasoning items come back encrypted and are
+            // replayed verbatim on the next turn (required before function_call).
+            body["store"] = false
+            body["include"] = ["reasoning.encrypted_content"]
         } else if let temp = req.temperature {
             body["temperature"] = temp
         }
@@ -143,20 +166,41 @@ public struct OpenAIResponsesAdapter: ProviderAdapter {
     }
 
     /// One neutral message can expand into several Responses input items
-    /// (a text message plus function_call / function_call_output items).
+    /// (reasoning items, a text message, function_call / function_call_output items).
     private static func inputItems(_ message: NeutralMessage) -> [[String: Any]] {
-        // Tool results become function_call_output items.
-        let toolResults = message.content.compactMap { block -> [String: Any]? in
-            if case .toolResult(let id, let content, _, _) = block {
-                return ["type": "function_call_output", "call_id": id, "output": content]
+        // Tool results become function_call_output items; any images ride in a
+        // follow-up user message (function_call_output is text-only).
+        var toolResults: [[String: Any]] = []
+        var resultImages: [ImageSource] = []
+        for block in message.content {
+            if case .toolResult(let id, let content, _, let images) = block {
+                toolResults.append(["type": "function_call_output", "call_id": id, "output": content])
+                resultImages.append(contentsOf: images)
             }
-            return nil
         }
-        if !toolResults.isEmpty { return toolResults }
+        if !toolResults.isEmpty {
+            if !resultImages.isEmpty {
+                let parts: [[String: Any]] = [["type": "input_text", "text": "Images returned by the tool call(s) above:"]]
+                    + resultImages.map { ["type": "input_image", "image_url": $0.dataURL] }
+                toolResults.append(["type": "message", "role": "user", "content": parts])
+            }
+            return toolResults
+        }
 
         switch message.role {
         case .assistant:
             var items: [[String: Any]] = []
+            // Reasoning items must precede the function_call they produced;
+            // the assembler preserved arrival order, so emit them first.
+            for block in message.content {
+                if case .thinking(_, let signature) = block,
+                   let signature, signature.hasPrefix("{"),
+                   let data = signature.data(using: .utf8),
+                   let item = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                   item["type"] as? String == "reasoning" {
+                    items.append(item)
+                }
+            }
             let textParts = message.content.compactMap { block -> [String: Any]? in
                 if case .text(let t) = block, !t.isEmpty { return ["type": "output_text", "text": t] }
                 return nil

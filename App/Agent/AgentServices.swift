@@ -1,6 +1,7 @@
 import Foundation
 import JAgent
 import JControl
+import JMemory
 import JProactive
 import JScreen
 import JStore
@@ -21,7 +22,7 @@ final class AgentServices {
     let funnel: NudgeFunnel
     let cronStore: CronStore
 
-    init(database: JarvisDatabase, supportDirectory: URL) {
+    init(database: JarvisDatabase, supportDirectory: URL, memoryStore: JMemory.MemoryStore) {
         let artifactsDir = supportDirectory.appendingPathComponent("artifacts", isDirectory: true)
         let scratchDir = supportDirectory.appendingPathComponent("scratch", isDirectory: true)
         let framesDir = supportDirectory.appendingPathComponent("frames", isDirectory: true)
@@ -45,6 +46,8 @@ final class AgentServices {
         self.cronStore = cronStore
         self.gate = ApprovalGate(store: approvalStore) { request in
             Task { @MainActor in presenter.enqueue(request) }
+        } dismiss: { id in
+            Task { @MainActor in presenter.dismiss(id) }
         }
         self.tools = ToolRegistry(
             StarterTools.specs(artifacts: artifactStore, scratch: scratchDir)
@@ -52,6 +55,7 @@ final class AgentServices {
                 + BridgeTools.registry()
                 + ScreenTools.registry(recall: screenRecall, buffer: screenBuffer)
                 + ProactiveTools.registry(cronStore: cronStore)
+                + MemoryTools.registry(store: memoryStore)
         )
 
         presenter.gate = gate

@@ -26,6 +26,29 @@ public struct AgentLoop: Sendable {
     /// Per-result cap before overflow is spilled to an artifact.
     public static let spillThreshold = 16_000
 
+    /// Hard deadline per tool execution so one hung AppleScript/EventKit call
+    /// can never wedge a run.
+    public static let toolTimeout: TimeInterval = 120
+
+    struct ToolTimeoutError: Error {}
+
+    /// Runs `work` with a deadline; the losing branch is cancelled.
+    static func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        _ work: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await work() }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw ToolTimeoutError()
+            }
+            guard let first = try await group.next() else { throw ToolTimeoutError() }
+            group.cancelAll()
+            return first
+        }
+    }
+
     let adapter: any ProviderAdapter
     let tools: ToolRegistry
     let gate: ApprovalGate
@@ -58,7 +81,6 @@ public struct AgentLoop: Sendable {
             let task = Task {
                 continuation.yield(.runStarted)
                 var messages = initial
-                var lastAssistantText = ""
                 var turn = 0
 
                 do {
@@ -89,6 +111,7 @@ public struct AgentLoop: Sendable {
                             switch event {
                             case .textDelta(let t): assembler.appendText(t); continuation.yield(.textDelta(t))
                             case .thinkingDelta(let t): assembler.appendThinking(t); continuation.yield(.thinkingDelta(t))
+                            case .thinkingSignature(let sig): assembler.attachThinkingSignature(sig)
                             case .toolUseStart(let id, let name): assembler.startTool(id: id, name: name)
                             case .toolInputDelta(let id, let frag): assembler.appendToolInput(id: id, fragment: frag)
                             case .toolUseEnd(let id): assembler.endTool(id: id)
@@ -98,7 +121,6 @@ public struct AgentLoop: Sendable {
                         }
 
                         let assistant = assembler.message()
-                        if !assistant.plainText.isEmpty { lastAssistantText = assistant.plainText }
                         messages.append(assistant)
                         continuation.yield(.assistantMessage(assistant))
 
@@ -115,6 +137,20 @@ public struct AgentLoop: Sendable {
                         var resultBlocks: [ContentBlock] = []
                         for use in toolUses {
                             try Task.checkCancellation()
+
+                            // A tool call whose JSON was cut off (max_tokens) or
+                            // malformed must not execute with empty arguments —
+                            // tell the model so it can retry.
+                            if assembler.malformedToolIDs.contains(use.id) {
+                                let reason = stop == .maxTokens
+                                    ? "Tool call arguments were truncated by the output-token limit. Retry with shorter arguments."
+                                    : "Tool call arguments were not valid JSON. Retry with corrected arguments."
+                                continuation.yield(.toolCallStarted(id: use.id, name: use.name, input: use.input))
+                                continuation.yield(.toolCallFinished(id: use.id, output: reason, isError: true))
+                                resultBlocks.append(.toolResult(toolUseId: use.id, content: reason, isError: true, images: []))
+                                continue
+                            }
+
                             let tool = tools.tool(named: use.name)
                             let scope = tool?.scopeKey?(use.input)
                             let summary = tool?.summarize?(use.input) ?? use.name
@@ -138,9 +174,13 @@ public struct AgentLoop: Sendable {
                             } else if let tool {
                                 do {
                                     let ctx = ToolContext(runID: runID, isBackground: config.isBackground)
-                                    output = try await tool.run(use.input, ctx)
+                                    output = try await Self.withTimeout(seconds: Self.toolTimeout) {
+                                        try await tool.run(use.input, ctx)
+                                    }
                                 } catch is CancellationError {
                                     throw CancellationError()
+                                } catch is ToolTimeoutError {
+                                    output = ToolOutput("Tool timed out after \(Int(Self.toolTimeout))s.", isError: true)
                                 } catch {
                                     output = ToolOutput("Tool error: \(error.localizedDescription)", isError: true)
                                 }
@@ -162,11 +202,9 @@ public struct AgentLoop: Sendable {
                         turn += 1
                     }
 
-                    // Turn cap hit: fall back to the last non-empty assistant text.
-                    if !lastAssistantText.isEmpty {
-                        continuation.yield(.assistantMessage(.assistant(lastAssistantText)))
-                    }
-                    continuation.yield(.completed(.maxTokens))
+                    // Turn cap hit. The last assistant text already streamed to
+                    // the UI — re-emitting it would duplicate the message.
+                    continuation.yield(.completed(.maxTurns))
                     continuation.finish()
                 } catch is CancellationError {
                     await gate.cancelAll()

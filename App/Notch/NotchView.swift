@@ -118,7 +118,12 @@ struct NotchView: View {
             }
         }
         .onChange(of: chat?.agent.presenter.current?.id) { _, newValue in
-            if newValue != nil, vm.state == .closed { withAnimation(openAnimation) { vm.open() } }
+            // The panel must never auto-close while an approval is pending —
+            // a timed-out prompt the user never saw is a silent deny.
+            vm.holdOpen = newValue != nil
+            if newValue != nil, vm.state == .closed, vm.screenFrame.contains(NSEvent.mouseLocation) {
+                withAnimation(openAnimation) { vm.open() }
+            }
         }
         .onChange(of: vm.state) { _, newState in
             if newState == .open { chat?.markProactiveRead() }

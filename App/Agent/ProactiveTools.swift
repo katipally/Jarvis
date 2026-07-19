@@ -5,14 +5,32 @@ import JProactive
 /// Lets the agent schedule recurring work for itself.
 enum ProactiveTools {
     static func registry(cronStore: CronStore) -> [ToolSpec] {
-        [scheduleTask(cronStore), listTasks(cronStore)]
+        [scheduleTask(cronStore), listTasks(cronStore), cancelTask(cronStore)]
+    }
+
+    private static func cancelTask(_ cronStore: CronStore) -> ToolSpec {
+        ToolSpec(
+            name: "cancel_scheduled_task",
+            description: "Disable a recurring task by its exact name (see list_scheduled_tasks). Use when the user asks to stop or remove a scheduled task.",
+            parameters: obj([p("name", "The exact task name to cancel")], required: ["name"]),
+            tier: .externalEffect,
+            summarize: { "Cancel scheduled task “\(str($0, "name") ?? "")”" }
+        ) { input, _ in
+            guard let name = str(input, "name") else { return ToolOutput("Missing 'name'.", isError: true) }
+            let jobs = await cronStore.list()
+            guard let job = jobs.first(where: { $0.name == name }) else {
+                return ToolOutput("No scheduled task named “\(name)”. Use list_scheduled_tasks for names.", isError: true)
+            }
+            await cronStore.setEnabled(id: job.id, false)
+            return ToolOutput("Cancelled “\(name)”.")
+        }
     }
 
     private static func scheduleTask(_ cronStore: CronStore) -> ToolSpec {
         ToolSpec(
             name: "schedule_task",
             description: "Schedule a recurring task. 'cron' is a 5-field expression (minute hour day-of-month month day-of-week), e.g. '0 9 * * *' = 9am daily, '*/30 * * * *' = every 30 min. 'prompt' is what to do when it fires.",
-            parameters: obj([("name", "Short task name"), ("cron", "5-field cron expression"), ("prompt", "What to do when it runs")], required: ["name", "cron", "prompt"]),
+            parameters: obj([p("name", "Short task name"), p("cron", "5-field cron expression (minute hour day month weekday)"), p("prompt", "What to do when the task fires")], required: ["name", "cron", "prompt"]),
             tier: .externalEffect,
             summarize: { "Schedule “\(str($0, "name") ?? "")” (\(str($0, "cron") ?? ""))" }
         ) { input, _ in

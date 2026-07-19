@@ -23,7 +23,11 @@ final class MemoryService {
             .filter { $0.role == .user || $0.role == .assistant }
             .map { "\($0.role == .user ? "User" : "Assistant"): \(text(of: $0))" }
             .joined(separator: "\n")
-        guard conversation.count > 60 else { return } // too short to be worth it
+        guard conversation.count > 60 else {
+            // Mark it done or launch recovery re-fires this segment forever.
+            await sessions.setExtractionStatus(segmentID, "skipped")
+            return
+        }
 
         guard let resolved = core.resolve(.aux) ?? core.resolve(.brain) else { return }
         await sessions.setExtractionStatus(segmentID, "running")
@@ -48,6 +52,15 @@ final class MemoryService {
         await store.ingest(result, segmentID: segmentID)
         await store.consolidate(olderThan: 0)
         await sessions.setExtractionStatus(segmentID, "done")
+    }
+
+    /// Durable in-turn memory write for the `remember` tool — "remember that my
+    /// garage code is 1234" must not wait for segment-close extraction.
+    func remember(_ text: String, kind: MemoryKind = .fact) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let result = ExtractionResult(memories: [ExtractedMemory(kind: kind, text: trimmed, importance: 0.8)])
+        await store.ingest(result, segmentID: nil)
     }
 
     /// Retrieve a context block for the user's message, or nil if nothing relevant.

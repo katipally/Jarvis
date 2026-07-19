@@ -39,7 +39,7 @@ enum BackgroundInput {
         event.postToPid(pid)
     }
 
-    static func typeText(pid: pid_t, text: String) throws {
+    static func typeText(pid: pid_t, text: String) async throws {
         guard let source = CGEventSource(stateID: .combinedSessionState) else { throw ControlError.eventSourceFailed }
         let units = Array(text.utf16)
         for start in stride(from: 0, to: units.count, by: 20) {
@@ -50,11 +50,11 @@ enum BackgroundInput {
             event.setIntegerValueField(.eventTargetUnixProcessID, value: Int64(pid))
             event.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
             event.postToPid(pid)
-            Thread.sleep(forTimeInterval: 0.01)
+            try await Task.sleep(for: .milliseconds(10))
         }
     }
 
-    static func pressKey(pid: pid_t, combo: String) throws {
+    static func pressKey(pid: pid_t, combo: String) async throws {
         let parsed = try parseCombo(combo)
         guard let source = CGEventSource(stateID: .combinedSessionState) else { throw ControlError.eventSourceFailed }
 
@@ -68,14 +68,14 @@ enum BackgroundInput {
         for modifier in active {
             accumulated.insert(modifier.flag)
             try postKey(source: source, pid: pid, keyCode: modifier.keyCode, keyDown: true, flags: accumulated)
-            Thread.sleep(forTimeInterval: 0.005)
+            try await Task.sleep(for: .milliseconds(5))
         }
         try postKey(source: source, pid: pid, keyCode: parsed.keyCode, keyDown: true, flags: parsed.flags)
-        Thread.sleep(forTimeInterval: 0.01)
+        try await Task.sleep(for: .milliseconds(10))
         try postKey(source: source, pid: pid, keyCode: parsed.keyCode, keyDown: false, flags: parsed.flags)
         for modifier in active.reversed() {
             accumulated.remove(modifier.flag)
-            Thread.sleep(forTimeInterval: 0.005)
+            try await Task.sleep(for: .milliseconds(5))
             try postKey(source: source, pid: pid, keyCode: modifier.keyCode, keyDown: false, flags: accumulated)
         }
     }

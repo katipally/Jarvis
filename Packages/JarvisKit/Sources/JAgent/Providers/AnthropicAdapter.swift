@@ -31,15 +31,19 @@ public struct AnthropicAdapter: ProviderAdapter {
 
     // MARK: - Streaming
 
+    /// True for api.anthropic.com — gates first-party-only request fields
+    /// (adaptive thinking, output_config, cache_control) that compatible
+    /// endpoints like MiniMax may not accept.
+    var isFirstParty: Bool {
+        baseURL.host?.hasSuffix("anthropic.com") ?? false
+    }
+
     public func stream(_ modelRequest: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     var req = self.request(path: "v1/messages", method: "POST")
-                    let body = Self.buildBody(modelRequest)
-                    if modelRequest.reasoningEffort != nil {
-                        req.setValue("interleaved-thinking-2025-05-14", forHTTPHeaderField: "anthropic-beta")
-                    }
+                    let body = Self.buildBody(modelRequest, firstParty: self.isFirstParty)
                     req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
                     let bytes = try await ProviderTransport.openSSEStream(session: session, request: req)
@@ -76,7 +80,11 @@ public struct AnthropicAdapter: ProviderAdapter {
         case "message_start":
             if let message = obj["message"] as? [String: Any],
                let usage = message["usage"] as? [String: Any] {
-                state.inputTokens = usage["input_tokens"] as? Int ?? 0
+                // Cached tokens are billed differently but are still real prompt
+                // size — fold them in so budgets and cost stay truthful.
+                state.inputTokens = (usage["input_tokens"] as? Int ?? 0)
+                    + (usage["cache_read_input_tokens"] as? Int ?? 0)
+                    + (usage["cache_creation_input_tokens"] as? Int ?? 0)
             }
 
         case "content_block_start":
@@ -86,6 +94,8 @@ public struct AnthropicAdapter: ProviderAdapter {
                 if blockType == "tool_use", let id = block["id"] as? String, let name = block["name"] as? String {
                     state.toolIDByIndex[index] = id
                     continuation.yield(.toolUseStart(id: id, name: name))
+                } else if blockType == "thinking" {
+                    state.thinkingIndexes.insert(index)
                 }
             }
 
@@ -97,6 +107,10 @@ public struct AnthropicAdapter: ProviderAdapter {
                     if let text = delta["text"] as? String { continuation.yield(.textDelta(text)) }
                 case "thinking_delta":
                     if let thinking = delta["thinking"] as? String { continuation.yield(.thinkingDelta(thinking)) }
+                case "signature_delta":
+                    if let sig = delta["signature"] as? String {
+                        state.signatureByIndex[index, default: ""] += sig
+                    }
                 case "input_json_delta":
                     if let partial = delta["partial_json"] as? String, let id = state.toolIDByIndex[index] {
                         continuation.yield(.toolInputDelta(id: id, jsonFragment: partial))
@@ -110,6 +124,9 @@ public struct AnthropicAdapter: ProviderAdapter {
             let index = obj["index"] as? Int ?? 0
             if let id = state.toolIDByIndex[index] {
                 continuation.yield(.toolUseEnd(id: id))
+            }
+            if state.thinkingIndexes.contains(index), let sig = state.signatureByIndex[index], !sig.isEmpty {
+                continuation.yield(.thinkingSignature(sig))
             }
 
         case "message_delta":
@@ -146,23 +163,49 @@ public struct AnthropicAdapter: ProviderAdapter {
 
     // MARK: - Body
 
-    static func buildBody(_ req: ModelRequest) -> [String: Any] {
+    /// Models that accept `thinking: {type: "adaptive"}` + `output_config.effort`.
+    /// Older families (Sonnet/Opus ≤4.5, Haiku) still need the legacy
+    /// `budget_tokens` shape.
+    static func supportsAdaptiveThinking(_ model: String) -> Bool {
+        if model.contains("fable") || model.contains("mythos") { return true }
+        if model.contains("sonnet-5") || model.contains("opus-5") { return true }
+        for family in ["opus-4-", "sonnet-4-"] {
+            if let range = model.range(of: family),
+               let minor = Int(model[range.upperBound...].prefix(1)), minor >= 6 {
+                return true
+            }
+        }
+        return false
+    }
+
+    static func buildBody(_ req: ModelRequest, firstParty: Bool) -> [String: Any] {
         var body: [String: Any] = [
             "model": req.model,
             "stream": true,
-            "messages": req.messages.map(messageJSON),
+            "messages": req.messages.compactMap(messageJSON),
         ]
 
         var maxTokens = req.maxTokens
         if let effort = req.reasoningEffort {
-            let budget = effort.anthropicBudget
-            maxTokens = max(maxTokens, budget + 4096)
-            body["thinking"] = ["type": "enabled", "budget_tokens": budget]
+            if firstParty && supportsAdaptiveThinking(req.model) {
+                body["thinking"] = ["type": "adaptive"]
+                body["output_config"] = ["effort": effort.anthropicEffort]
+                maxTokens = max(maxTokens, 16_000) // thinking counts against max_tokens
+            } else {
+                let budget = effort.anthropicBudget
+                maxTokens = max(maxTokens, budget + 4096)
+                body["thinking"] = ["type": "enabled", "budget_tokens": budget]
+            }
         } else if let temp = req.temperature {
             body["temperature"] = temp
         }
         body["max_tokens"] = maxTokens
 
+        if firstParty {
+            // Auto-place a cache breakpoint on the last cacheable block so the
+            // whole prefix (tools + system + history) is reused across turns.
+            body["cache_control"] = ["type": "ephemeral"]
+        }
         if let system = req.system, !system.isEmpty {
             body["system"] = system
         }
@@ -174,19 +217,23 @@ public struct AnthropicAdapter: ProviderAdapter {
         return body
     }
 
-    private static func messageJSON(_ message: NeutralMessage) -> [String: Any] {
+    private static func messageJSON(_ message: NeutralMessage) -> [String: Any]? {
         // Anthropic has only user/assistant roles; tool results ride inside a user turn.
         let role = (message.role == .assistant) ? "assistant" : "user"
         let blocks = message.content.compactMap(blockJSON)
+        guard !blocks.isEmpty else { return nil } // empty content blocks are rejected by the API
         return ["role": role, "content": blocks]
     }
 
     private static func blockJSON(_ block: ContentBlock) -> [String: Any]? {
         switch block {
         case .text(let t):
-            return ["type": "text", "text": t]
-        case .thinking:
-            return nil // thinking blocks are not replayed without their signature
+            return t.isEmpty ? nil : ["type": "text", "text": t]
+        case .thinking(let t, let signature):
+            // Replay only signed thinking (required before tool_use on current
+            // models). Signatures starting with "{" belong to other providers.
+            guard let signature, !signature.isEmpty, !signature.hasPrefix("{") else { return nil }
+            return ["type": "thinking", "thinking": t, "signature": signature]
         case .image(let img):
             return ["type": "image", "source": ["type": "base64", "media_type": img.mediaType, "data": img.base64Data]]
         case .toolUse(let id, let name, let input):
@@ -204,7 +251,10 @@ public struct AnthropicAdapter: ProviderAdapter {
 
     public func listModels() async throws -> [ProviderModel] {
         var req = request(path: "v1/models", method: "GET")
-        req.setValue("100", forHTTPHeaderField: "limit")
+        if var components = URLComponents(url: req.url!, resolvingAgainstBaseURL: false) {
+            components.queryItems = [URLQueryItem(name: "limit", value: "100")]
+            req.url = components.url
+        }
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             return []
@@ -223,4 +273,6 @@ private struct AnthropicStreamState {
     var outputTokens = 0
     var stopReason: StopReason = .endTurn
     var toolIDByIndex: [Int: String] = [:]
+    var thinkingIndexes: Set<Int> = []
+    var signatureByIndex: [Int: String] = [:]
 }

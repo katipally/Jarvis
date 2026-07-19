@@ -25,6 +25,8 @@ public struct ChatEngine: Sendable {
                         case .thinkingDelta(let t):
                             assembler.appendThinking(t)
                             continuation.yield(.thinkingDelta(t))
+                        case .thinkingSignature(let sig):
+                            assembler.attachThinkingSignature(sig)
                         case .toolUseStart(let id, let name):
                             assembler.startTool(id: id, name: name)
                         case .toolInputDelta(let id, let fragment):
@@ -52,19 +54,51 @@ public struct ChatEngine: Sendable {
     }
 }
 
-/// Accumulates streaming deltas into a final assistant `NeutralMessage`.
+/// Accumulates streaming deltas into a final assistant `NeutralMessage`,
+/// preserving the arrival order of blocks (thinking/text/tool interleaving
+/// matters when the turn is replayed to the provider).
 struct MessageAssembler {
-    private var text = ""
-    private var thinking = ""
-    private var toolOrder: [String] = []
+    private enum Part {
+        case text(String)
+        case thinking(String, signature: String?)
+        case tool(id: String)
+    }
+
+    private var parts: [Part] = []
     private var toolNames: [String: String] = [:]
     private var toolInputs: [String: String] = [:]
+    /// Tool ids whose input JSON failed to parse (e.g. truncated by max_tokens).
+    private(set) var malformedToolIDs: Set<String> = []
 
-    mutating func appendText(_ t: String) { text += t }
-    mutating func appendThinking(_ t: String) { thinking += t }
+    mutating func appendText(_ t: String) {
+        if case .text(let existing) = parts.last {
+            parts[parts.count - 1] = .text(existing + t)
+        } else {
+            parts.append(.text(t))
+        }
+    }
+
+    mutating func appendThinking(_ t: String) {
+        if case .thinking(let existing, let sig) = parts.last {
+            parts[parts.count - 1] = .thinking(existing + t, signature: sig)
+        } else {
+            parts.append(.thinking(t, signature: nil))
+        }
+    }
+
+    /// Attaches the provider's replay token to the most recent thinking block
+    /// (creating an empty one if the provider sent no visible thinking text).
+    mutating func attachThinkingSignature(_ signature: String) {
+        if let index = parts.lastIndex(where: { if case .thinking = $0 { return true }; return false }),
+           case .thinking(let text, _) = parts[index] {
+            parts[index] = .thinking(text, signature: signature)
+        } else {
+            parts.append(.thinking("", signature: signature))
+        }
+    }
 
     mutating func startTool(id: String, name: String) {
-        if toolNames[id] == nil { toolOrder.append(id) }
+        if toolNames[id] == nil { parts.append(.tool(id: id)) }
         toolNames[id] = name
         if toolInputs[id] == nil { toolInputs[id] = "" }
     }
@@ -75,13 +109,27 @@ struct MessageAssembler {
 
     mutating func endTool(id: String) { /* input finalized on message() */ }
 
-    func message() -> NeutralMessage {
+    mutating func message() -> NeutralMessage {
         var blocks: [ContentBlock] = []
-        if !thinking.isEmpty { blocks.append(.thinking(thinking)) }
-        if !text.isEmpty { blocks.append(.text(text)) }
-        for id in toolOrder {
-            let input = JSONValue.parse(toolInputs[id] ?? "") ?? .object([:])
-            blocks.append(.toolUse(id: id, name: toolNames[id] ?? "", input: input))
+        for part in parts {
+            switch part {
+            case .text(let t) where !t.isEmpty:
+                blocks.append(.text(t))
+            case .thinking(let t, let sig) where !t.isEmpty || sig != nil:
+                blocks.append(.thinking(t, signature: sig))
+            case .tool(let id):
+                let raw = toolInputs[id] ?? ""
+                let input: JSONValue
+                if let parsed = JSONValue.parse(raw) {
+                    input = parsed
+                } else {
+                    malformedToolIDs.insert(id)
+                    input = .object([:])
+                }
+                blocks.append(.toolUse(id: id, name: toolNames[id] ?? "", input: input))
+            default:
+                break
+            }
         }
         if blocks.isEmpty { blocks.append(.text("")) }
         return NeutralMessage(role: .assistant, content: blocks)

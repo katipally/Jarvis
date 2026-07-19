@@ -59,12 +59,41 @@ final class ChatStore {
     private var pendingToolResults: [ContentBlock] = []
     private var activeAssistantID: String?
     private var runTask: Task<Void, Never>?
+    private var lastUserText: String?
+    private var queuedProactive: [String] = []
 
+    /// Rough transcript cap (~chars ≈ tokens × 4). Oldest turns are dropped
+    /// beyond it so a long segment can't overflow the model's context.
+    // ponytail: char-count sliding window; aux-model summarization if recall of
+    // dropped turns ever matters.
+    private static let transcriptCharBudget = 300_000
+
+    /// The system prompt is deliberately static — every dynamic fact (time,
+    /// frontmost app, memory) rides in the user turn so the provider prompt
+    /// cache stays valid across turns and sessions.
     private static let systemPrompt = """
-    You are Jarvis, a proactive macOS assistant living in the notch. Be concise and \
-    direct. Use Markdown when it aids clarity. You have tools to inspect and act on the \
-    Mac — use them when they help, and explain what you did. If you don't know something, \
-    say so.
+    You are Jarvis, the assistant that lives in the notch at the top of this Mac's screen. \
+    You are a fast, capable alternative to Siri: you answer questions, control the Mac, \
+    manage calendars, reminders, mail, and notes, remember things across conversations, \
+    and can see the screen when asked.
+
+    ## Tools
+    You have tools to inspect and act on this Mac. Prefer acting over describing: when the \
+    user asks for something a tool can do, do it. Read-only tools run instantly; tools \
+    that change anything ask the user for approval first — never promise an action \
+    succeeded before its result comes back. If a tool fails, say what failed and try a \
+    sensible alternative before giving up. Use `remember` when the user tells you \
+    something worth keeping ("remember that…", preferences, facts about themselves).
+
+    ## Style
+    You live in a small panel: be brief. Lead with the answer, not preamble. One short \
+    paragraph is the norm; use Markdown lists or code blocks only when structure genuinely \
+    helps. Match the user's language. If you don't know, say so plainly. Never invent \
+    facts about the user's machine, files, or calendar — check with a tool instead.
+
+    A `<context>` block in the user's message carries the current date, time, frontmost \
+    app, and relevant memories. Treat it as ground truth for "today", "tomorrow", and \
+    similar references; never echo the block itself.
     """
 
     init(core: JarvisCore, sessions: SessionManager, agent: AgentServices) {
@@ -95,8 +124,7 @@ final class ChatStore {
             userText = trimmed.isEmpty ? joined : "\(trimmed)\n\n\(joined)"
         }
 
-        let userMessage = NeutralMessage.user(userText, images: images)
-        transcript.append(userMessage)
+        lastUserText = userText
         messages.append(DisplayMessage(id: UUID().uuidString, role: .user, text: trimmed, images: images))
 
         input = ""
@@ -110,7 +138,6 @@ final class ChatStore {
         let artifactStore = agent.artifactStore
         let tools = agent.tools
         let gate = agent.gate
-        let initial = transcript
         let runStore = agent.runStore
         let sessions = self.sessions
         let memory = self.memory
@@ -118,25 +145,37 @@ final class ChatStore {
         let effort = resolved.effort
         let model = resolved.model
         let providerLabel = resolved.account.provider
-        let retrievalQuery = userText
         var usage = Usage()
 
         runTask = Task { [weak self] in
             await runStore.createRun(id: runID, kind: "foreground", segmentID: nil, initiator: "user")
-            _ = try? await sessions.beginUserTurn()
-            _ = try? await sessions.append(role: .user, content: userMessage.content, status: .complete)
+            let turn = try? await sessions.beginUserTurn()
+            if turn?.startedNewSegment == true {
+                // Fresh segment = fresh context; the closed segment's content is
+                // handed to memory extraction, not resent forever.
+                self?.transcript = []
+            }
 
-            // Inject recalled memory into this turn's system prompt.
-            let memoryContext = await memory?.context(for: retrievalQuery)
-            let system = memoryContext.map { "\(Self.systemPrompt)\n\n\($0)" } ?? Self.systemPrompt
+            // Dynamic per-turn context (date/time, frontmost app, memory) rides
+            // in the user turn so the system prompt stays byte-stable for caching.
+            let memoryContext = await memory?.context(for: userText)
+            let userMessage = NeutralMessage.user(
+                Self.contextBlock(memory: memoryContext) + "\n\n" + userText,
+                images: images
+            )
+            guard let self else { return }
+            self.transcript.append(userMessage)
+            self.trimTranscriptIfNeeded()
+            _ = try? await sessions.append(role: .user, content: [.text(userText)] + images.map(ContentBlock.image), status: .complete)
+
             let loop = AgentLoop(
                 adapter: adapter, tools: tools, gate: gate,
-                config: .init(model: model, system: system, effort: effort, maxTokens: 4096, maxTurns: 12),
+                config: .init(model: model, system: Self.systemPrompt, effort: effort, maxTokens: 8192, maxTurns: 12),
                 spill: { name, content in await artifactStore.spill(runID: runID, toolName: name, content: content) }
             )
 
-            for await event in loop.run(initial: initial, runID: runID) {
-                guard let self else { break }
+            var completion: StopReason?
+            for await event in loop.run(initial: self.transcript, runID: runID) {
                 switch event {
                 case .runStarted:
                     break
@@ -162,39 +201,148 @@ final class ChatStore {
                 case .usage(let u):
                     usage.inputTokens += u.inputTokens
                     usage.outputTokens += u.outputTokens
-                case .completed:
+                case .completed(let reason):
+                    completion = reason
                     self.flushPendingToolResults()
                 case .aborted:
-                    self.repairDanglingTools()
-                    self.markActiveAborted()
+                    break // handled below — cancellation usually ends iteration before this arrives
                 case .failed(let message):
                     self.showFailure(message)
                 }
             }
 
-            let status = self?.errorText == nil ? "done" : "error"
-            await runStore.finishRun(id: runID, status: status, usage: usage, error: self?.errorText)
-            await MainActor.run {
-                self?.phase = .idle
-                self?.onRunComplete?()
+            // Cancellation ends stream iteration before `.aborted` can be
+            // delivered, so abort handling must live HERE, not in the loop.
+            if Task.isCancelled {
+                self.repairDanglingTools()
+                self.markActiveAborted()
             }
+            if completion == .refusal {
+                self.showFailure("The model declined to answer this request.")
+            }
+
+            self.finishRun(runID: runID, usage: usage, interrupted: Task.isCancelled)
         }
+    }
+
+    /// End-of-run persistence runs in an unstructured task: GRDB honors task
+    /// cancellation, so doing these writes inside the cancelled run task would
+    /// silently drop them (runs stuck "running" forever).
+    private func finishRun(runID: String, usage: Usage, interrupted: Bool) {
+        let runStore = agent.runStore
+        let status = interrupted ? "cancelled" : (errorText == nil ? "done" : "error")
+        let errorText = self.errorText
+        Task { @MainActor [weak self] in
+            await runStore.finishRun(id: runID, status: status, usage: usage, error: errorText)
+            guard let self else { return }
+            self.phase = .idle
+            self.deliverQueuedProactive()
+            if !interrupted { self.onRunComplete?() }
+        }
+    }
+
+    /// Re-send the last user message (retry affordance after a failure).
+    func retryLast() {
+        guard phase == .idle, let last = lastUserText, !last.isEmpty else { return }
+        errorText = nil
+        input = last
+        send()
     }
 
     func interrupt() {
         runTask?.cancel()
     }
 
+    // MARK: - Per-turn context
+
+    private static let contextDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a"
+        return f
+    }()
+
+    private static func contextBlock(memory: String?) -> String {
+        var lines = ["<context>"]
+        lines.append("Now: \(contextDateFormatter.string(from: .now)) (\(TimeZone.current.identifier))")
+        if let app = NSWorkspace.shared.frontmostApplication?.localizedName {
+            lines.append("Frontmost app: \(app)")
+        }
+        if let memory, !memory.isEmpty {
+            lines.append(memory)
+        }
+        lines.append("</context>")
+        return lines.joined(separator: "\n")
+    }
+
+    /// Drop oldest turns beyond the char budget, keeping tool_use/tool_result
+    /// pairs intact by always cutting at a user-text boundary.
+    private func trimTranscriptIfNeeded() {
+        var total = transcript.reduce(0) { $0 + $1.content.reduce(0) { $0 + blockSize($1) } }
+        guard total > Self.transcriptCharBudget else { return }
+        var dropCount = 0
+        for message in transcript {
+            let size = message.content.reduce(0) { $0 + blockSize($1) }
+            if total <= Self.transcriptCharBudget { break }
+            total -= size
+            dropCount += 1
+        }
+        // Never split an assistant tool_use from its results: advance to the
+        // next plain user turn.
+        while dropCount < transcript.count, !isPlainUserTurn(transcript[dropCount]) {
+            dropCount += 1
+        }
+        transcript.removeFirst(min(dropCount, max(0, transcript.count - 2)))
+    }
+
+    private func blockSize(_ block: ContentBlock) -> Int {
+        switch block {
+        case .text(let t): t.count
+        case .thinking(let t, _): t.count
+        case .image: 6000 // rough token-equivalent of one attached image
+        case .toolUse(_, _, let input): input.jsonString.count
+        case .toolResult(_, let content, _, let images): content.count + images.count * 6000
+        }
+    }
+
+    private func isPlainUserTurn(_ message: NeutralMessage) -> Bool {
+        message.role == .user && !message.content.contains {
+            if case .toolResult = $0 { return true }
+            return false
+        }
+    }
+
     func addAttachment(_ attachment: Attachment) { attachments.append(attachment) }
     func removeAttachment(_ id: String) { attachments.removeAll { $0.id == id } }
 
     /// Jarvis-initiated message (nudge, cron brief, heartbeat). Appears in chat + glows the notch.
+    /// Queued while a run is streaming — splicing an assistant message between a
+    /// tool_use and its results would corrupt the transcript.
     func receiveProactive(_ body: String) {
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        if phase == .responding {
+            queuedProactive.append(text)
+            return
+        }
+        deliverProactive(text)
+    }
+
+    private func deliverQueuedProactive() {
+        guard phase == .idle else { return }
+        for text in queuedProactive { deliverProactive(text) }
+        queuedProactive = []
+    }
+
+    private func deliverProactive(_ text: String) {
         messages.append(DisplayMessage(id: UUID().uuidString, role: .assistant, text: text))
         transcript.append(.assistant(text))
         hasUnreadProactive = true
+        let sessions = self.sessions
+        Task {
+            // Proactive messages belong to history too (survive relaunch).
+            _ = try? await sessions.beginUserTurn()
+            _ = try? await sessions.append(role: .assistant, content: [.text(text)], status: .complete)
+        }
     }
 
     func markProactiveRead() { hasUnreadProactive = false }

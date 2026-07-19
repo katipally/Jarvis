@@ -56,7 +56,7 @@ public enum ScreenCapture {
             appBundleID: window.owningApplication?.bundleIdentifier,
             appName: window.owningApplication?.applicationName,
             windowTitle: window.title,
-            displayID: Int(window.windowID)
+            displayID: 0 // SCWindow doesn't expose its display; never a window id
         )
     }
 
@@ -84,7 +84,13 @@ public enum ScreenCapture {
 
 public enum ScreenError: Error, LocalizedError {
     case permissionDenied
+    case noWindow
     public var errorDescription: String? {
-        "Screen Recording permission is required. Grant it in System Settings › Privacy & Security › Screen Recording."
+        switch self {
+        case .permissionDenied:
+            "Screen Recording permission is required. Grant it in System Settings › Privacy & Security › Screen Recording."
+        case .noWindow:
+            "No capturable window is frontmost right now."
+        }
     }
 }

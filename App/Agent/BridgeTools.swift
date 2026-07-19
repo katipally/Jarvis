@@ -16,7 +16,7 @@ enum BridgeTools {
         ToolSpec(
             name: "calendar_add_event",
             description: "Add an event to the default calendar. Dates are ISO8601 or 'yyyy-MM-dd HH:mm'.",
-            parameters: obj([("title", "Event title"), ("start", "Start date/time"), ("end", "End (optional, defaults +1h)"), ("notes", "Notes (optional)")], required: ["title", "start"]),
+            parameters: obj([p("title", "Event title"), p("start", "Start, ISO8601 or 'yyyy-MM-dd HH:mm' — resolve relative dates ('tomorrow 3pm') against the <context> date first"), p("end", "End date/time; defaults to one hour after start"), p("notes", "Event notes")], required: ["title", "start"]),
             tier: .externalEffect,
             summarize: { "Add calendar event “\(str($0, "title") ?? "")”" }
         ) { input, _ in
@@ -46,7 +46,7 @@ enum BridgeTools {
         ToolSpec(
             name: "calendar_list",
             description: "List upcoming calendar events for the next N days (default 7).",
-            parameters: obj([("days", "Number of days ahead (optional)")], required: []),
+            parameters: obj([pInt("days", "How many days ahead to list (default 7)")], required: []),
             tier: .readOnly
         ) { input, _ in
             let store = EKEventStore()
@@ -69,7 +69,7 @@ enum BridgeTools {
         ToolSpec(
             name: "reminders_add",
             description: "Add a reminder with an optional due date/time.",
-            parameters: obj([("title", "Reminder text"), ("due", "Due date/time (optional)")], required: ["title"]),
+            parameters: obj([p("title", "Reminder text"), p("due", "Due date/time, ISO8601 or 'yyyy-MM-dd HH:mm'")], required: ["title"]),
             tier: .externalEffect,
             summarize: { "Add reminder “\(str($0, "title") ?? "")”" }
         ) { input, _ in
@@ -122,9 +122,14 @@ enum BridgeTools {
         ToolSpec(
             name: "mail_send",
             description: "Send an email via Mail.app.",
-            parameters: obj([("to", "Recipient email"), ("subject", "Subject"), ("body", "Message body")], required: ["to", "subject", "body"]),
+            parameters: obj([p("to", "Recipient email address"), p("subject", "Subject line"), p("body", "Plain-text message body — shown in full to the user for approval before sending")], required: ["to", "subject", "body"]),
             tier: .externalEffect,
-            summarize: { "Send email to \(str($0, "to") ?? "") — “\(str($0, "subject") ?? "")”" }
+            scopeKey: { str($0, "to") }, // "Always allow" is per-recipient, never global
+            summarize: { input in
+                let body = str(input, "body") ?? ""
+                let preview = body.count > 300 ? body.prefix(300) + "…" : body[...]
+                return "Send email to \(str(input, "to") ?? "") — “\(str(input, "subject") ?? "")”\n\n\(preview)"
+            }
         ) { input, _ in
             guard let to = str(input, "to"), let subject = str(input, "subject"), let body = str(input, "body") else {
                 return ToolOutput("Missing 'to', 'subject', or 'body'.", isError: true)
@@ -144,7 +149,7 @@ enum BridgeTools {
         ToolSpec(
             name: "notes_create",
             description: "Create a note in Notes.app.",
-            parameters: obj([("title", "Note title (optional)"), ("body", "Note body")], required: ["body"]),
+            parameters: obj([p("title", "Note title"), p("body", "Note body text")], required: ["body"]),
             tier: .externalEffect,
             summarize: { "Create note “\(str($0, "title") ?? (str($0, "body") ?? "").prefix(30).description)”" }
         ) { input, _ in
@@ -160,15 +165,22 @@ enum BridgeTools {
 
     // MARK: - Helpers
 
+    /// NSAppleScript needs a single thread, but not the main one — running it
+    /// there would freeze the notch for the whole Apple-events round trip.
+    private static let scriptQueue = DispatchQueue(label: "jarvis.applescript")
+
     private static func runAppleScript(_ source: String, success: String) async -> ToolOutput {
-        await MainActor.run {
-            var error: NSDictionary?
-            let script = NSAppleScript(source: source)
-            _ = script?.executeAndReturnError(&error)
-            if let error, let message = error["NSAppleScriptErrorMessage"] as? String {
-                return ToolOutput("AppleScript failed: \(message) (you may need to allow Automation in System Settings › Privacy & Security › Automation).", isError: true)
+        await withCheckedContinuation { continuation in
+            scriptQueue.async {
+                var error: NSDictionary?
+                let script = NSAppleScript(source: source)
+                _ = script?.executeAndReturnError(&error)
+                if let error, let message = error["NSAppleScriptErrorMessage"] as? String {
+                    continuation.resume(returning: ToolOutput("AppleScript failed: \(message) (you may need to allow Automation in System Settings › Privacy & Security › Automation).", isError: true))
+                } else {
+                    continuation.resume(returning: ToolOutput(success))
+                }
             }
-            return ToolOutput(success)
         }
     }
 

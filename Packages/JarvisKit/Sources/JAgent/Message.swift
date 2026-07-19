@@ -14,9 +14,13 @@ public struct ImageSource: Sendable, Codable, Equatable {
 }
 
 /// One piece of message content. The neutral model every provider maps to.
+///
+/// `thinking.signature` is the provider's opaque replay token (Anthropic thinking
+/// signature, or a JSON-encoded OpenAI reasoning item). Adapters replay only
+/// signatures they themselves produced and drop the rest.
 public enum ContentBlock: Sendable, Codable, Equatable {
     case text(String)
-    case thinking(String)
+    case thinking(String, signature: String?)
     case image(ImageSource)
     case toolUse(id: String, name: String, input: JSONValue)
     case toolResult(toolUseId: String, content: String, isError: Bool, images: [ImageSource])
