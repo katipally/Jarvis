@@ -87,21 +87,23 @@ enum PermissionsChecker {
     }
 
     /// Trigger the system prompt where possible, else open System Settings.
+    /// TCC completion handlers arrive on private XPC queues — they must be
+    /// `@Sendable` (non-MainActor) or the isolation assert traps at runtime.
     static func request(_ permission: Permission) {
         switch permission {
         case .microphone:
-            AVCaptureDevice.requestAccess(for: .audio) { _ in }
+            AVCaptureDevice.requestAccess(for: .audio) { @Sendable _ in }
         case .speech:
-            SFSpeechRecognizer.requestAuthorization { _ in }
+            SFSpeechRecognizer.requestAuthorization { @Sendable _ in }
         case .accessibility:
             let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(options)
         case .screenRecording:
             CGRequestScreenCaptureAccess()
         case .calendar:
-            EKEventStore().requestFullAccessToEvents { _, _ in }
+            EKEventStore().requestFullAccessToEvents { @Sendable _, _ in }
         case .reminders:
-            EKEventStore().requestFullAccessToReminders { _, _ in }
+            EKEventStore().requestFullAccessToReminders { @Sendable _, _ in }
         case .automation:
             openSettings(permission)
         }

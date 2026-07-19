@@ -6,13 +6,48 @@ import SwiftUI
 struct HomeView: View {
     @Bindable var chat: ChatStore
     var voice: VoiceController?
+    /// Reports the height the body wants (current answer + composer) so the
+    /// notch can grow to fit the answer — capped by the view model.
+    var onBodyHeightChange: (CGFloat) -> Void = { _ in }
+
     @State private var isDropTargeted = false
     @FocusState private var inputFocused: Bool
+    @State private var answerHeight: CGFloat = 0
+    @State private var composerHeight: CGFloat = 0
+
+    /// Comfortable body height for the greeting (no conversation yet).
+    private let greetingBaseHeight: CGFloat = 190
 
     /// A transcript row that repeats the composer error banner verbatim is
     /// suppressed so the failure renders on a single surface.
     private var visibleMessages: [DisplayMessage] {
         chat.messages.filter { !($0.isError && $0.text == chat.errorText) }
+    }
+
+    /// Rows after the last user message: the exchange currently "in focus".
+    /// Everything before it lives above the fold (scroll up to see).
+    private var answerStartIndex: Int? {
+        guard !visibleMessages.isEmpty else { return nil }
+        guard let lastUser = visibleMessages.lastIndex(where: { $0.role == .user }) else { return 0 }
+        let start = lastUser + 1
+        return start < visibleMessages.count ? start : nil
+    }
+
+    private var priorMessages: ArraySlice<DisplayMessage> {
+        visibleMessages[..<(answerStartIndex ?? visibleMessages.count)]
+    }
+
+    private var answerMessages: ArraySlice<DisplayMessage> {
+        guard let start = answerStartIndex else { return visibleMessages[visibleMessages.endIndex...] }
+        return visibleMessages[start...]
+    }
+
+    private func reportBodyHeight() {
+        // Waiting for the first token of a new answer: hold the current size
+        // instead of collapsing and re-growing.
+        if chat.phase == .responding, answerMessages.isEmpty { return }
+        let content = answerMessages.isEmpty ? greetingBaseHeight : answerHeight
+        onBodyHeightChange(content + composerHeight + 14)
     }
 
     var body: some View {
@@ -40,44 +75,66 @@ struct HomeView: View {
         .animation(.snappy, value: isDropTargeted)
     }
 
-    /// Answer-focused transcript: opens pinned to the latest reply; scrolling up
-    /// pages older persisted conversation in (iMessage style). The empty state
-    /// is a personal greeting, LocalNotch-style.
+    /// Answer-focused transcript: the notch fits the current answer, so only it
+    /// is visible; the user's message, earlier exchanges, and older sessions sit
+    /// above the fold and appear on scroll-up (iMessage style).
     private var transcript: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                if chat.hasOlderHistory {
-                    HStack {
-                        Spacer()
-                        ProgressView().controlSize(.mini)
-                        Spacer()
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if chat.hasOlderHistory {
+                        HStack {
+                            Spacer()
+                            ProgressView().controlSize(.mini)
+                            Spacer()
+                        }
+                        .padding(.vertical, 6)
+                        .onAppear { chat.loadOlderHistory() }
                     }
-                    .padding(.vertical, 6)
-                    .onAppear { chat.loadOlderHistory() }
+                    if visibleMessages.isEmpty {
+                        GreetingView()
+                            .containerRelativeFrame(.vertical) { height, _ in height * 0.96 }
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        ForEach(priorMessages) { message in
+                            MessageRow(message: message)
+                        }
+                        // The in-focus exchange: measured as one unit so the panel
+                        // can grow to fit exactly this content.
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(answerMessages) { message in
+                                MessageRow(message: message)
+                            }
+                        }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            answerHeight = height
+                            reportBodyHeight()
+                        }
+                        Color.clear.frame(height: 1).id("live-bottom")
+                    }
                 }
-                if visibleMessages.isEmpty {
-                    GreetingView()
-                        .containerRelativeFrame(.vertical) { height, _ in height * 0.96 }
-                        .frame(maxWidth: .infinity)
-                } else {
-                    ForEach(visibleMessages) { message in
-                        MessageRow(message: message)
-                    }
+                .padding(.top, 4)
+                .padding(.bottom, 10)
+            }
+            // Sending re-pins the view to the incoming answer even if the user
+            // had scrolled up into history (iMessage behavior).
+            .onChange(of: chat.phase) { _, phase in
+                if phase == .responding {
+                    withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
                 }
             }
-            .padding(.top, 4)
-            .padding(.bottom, 10)
         }
         .defaultScrollAnchor(.bottom)
         .scrollIndicators(.hidden)
         .mask {
-            // Content dissolves at the edges instead of clipping hard.
+            // Content dissolves at the edges instead of clipping hard. Kept
+            // shallow so a tightly-fitted one-line answer isn't dimmed.
             VStack(spacing: 0) {
-                LinearGradient(colors: [.black.opacity(0.05), .black], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 18)
+                LinearGradient(colors: [.black.opacity(0.2), .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 10)
                 Rectangle()
-                LinearGradient(colors: [.black, .black.opacity(0.1)], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 12)
+                LinearGradient(colors: [.black, .black.opacity(0.2)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 8)
             }
         }
     }
@@ -165,6 +222,10 @@ struct HomeView: View {
         .animation(.snappy, value: chat.attachments)
         .animation(.snappy, value: chat.phase)
         .onAppear { inputFocused = true }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            composerHeight = height
+            reportBodyHeight()
+        }
     }
 
     /// The single error surface: message + Retry + dismiss, above the composer.

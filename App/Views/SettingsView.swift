@@ -10,11 +10,14 @@ struct SettingsView: View {
     @State private var showAddProvider = false
     @State private var pendingDelete: ProviderAccount?
 
+    private static let sessionGapChoices = [2, 5, 10, 15, 30, 60]
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 providersSection
                 rolesSection
+                sessionsSection
                 PermissionsDashboard()
             }
             .padding(.vertical, 16)
@@ -35,6 +38,40 @@ struct SettingsView: View {
                 pendingDelete = nil
             }
             Button("Cancel", role: .cancel) { pendingDelete = nil }
+        }
+    }
+
+    // MARK: - Sessions
+
+    private var sessionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Sessions", trailing: nil, action: nil)
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Start a new session after")
+                        .font(.jarvisBody)
+                        .foregroundStyle(.white.opacity(0.85))
+                    Text("Any message resets the timer; a reply after this much quiet starts a fresh conversation.")
+                        .font(.jarvisFootnote)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Picker("", selection: Binding(
+                    get: { core.sessionGapMinutes },
+                    set: { minutes in Task { await core.setSessionGap(minutes: minutes) } }
+                )) {
+                    ForEach(Self.sessionGapChoices, id: \.self) { minutes in
+                        Text(minutes == 60 ? "1 hour" : "\(minutes) min").tag(minutes)
+                    }
+                }
+                .pickerStyle(.menu)
+                .buttonStyle(.plain)
+                .tint(.white)
+                .fixedSize()
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.05)))
         }
     }
 

@@ -48,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.pushToTalk = pushToTalk
 
             self.sessions = sessions
+            core.onSessionGapChange = { minutes in
+                Task { await sessions.setIdleGap(TimeInterval(minutes * 60)) }
+            }
             Task {
                 await sessions.setOnSegmentClose { segmentID in
                     Task { @MainActor in await memoryService.extract(segmentID: segmentID) }

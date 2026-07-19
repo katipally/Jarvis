@@ -56,13 +56,28 @@ final class NotchViewModel {
 
     // MARK: - Per-tab sizing
 
+    /// Home's body height as reported by the chat view (answer + composer).
+    /// Drives the dynamic panel height: the notch grows just enough to fit the
+    /// current answer, capped at half the screen.
+    var homeBodyHeight: CGFloat?
+
+    /// Home chrome above/below the body (header row + content paddings).
+    private var homeChromeHeight: CGFloat { closedNotchSize.height + 8 + 26 }
+
+    /// Low floor: a one-line answer should give a compact panel, not a tall
+    /// empty one; the greeting reports its own comfortable height instead.
+    var homeMinHeight: CGFloat { clamp(screenFrame.height * 0.16, 150, 200) }
+    var homeMaxHeight: CGFloat { screenFrame.height * 0.5 }
+
     /// Each tab expands the notch to its own proportion of the screen.
     func openContentSize(for tab: Tab) -> CGSize {
         let w = screenFrame.width
         let h = screenFrame.height
         switch tab {
         case .home:
-            return CGSize(width: clamp(w * 0.32, 440, 540), height: clamp(h * 0.30, 220, 340))
+            let height = homeBodyHeight.map { clamp($0 + homeChromeHeight, homeMinHeight, homeMaxHeight) }
+                ?? homeMinHeight
+            return CGSize(width: clamp(w * 0.32, 440, 540), height: height)
         case .history:
             return CGSize(width: clamp(w * 0.40, 520, 680), height: clamp(h * 0.34, 240, 400))
         case .settings:
@@ -86,9 +101,10 @@ final class NotchViewModel {
     }
 
     /// The window is fixed at the largest a tab can ever need; only the inner
-    /// content scales, so expansion always originates from the notch.
+    /// content scales, so expansion always originates from the notch. Home can
+    /// grow to half the screen, so the window must always allow for it.
     private var maxOpenContentSize: CGSize {
-        Tab.allCases.reduce(.zero) { acc, tab in
+        Tab.allCases.reduce(CGSize(width: 0, height: homeMaxHeight)) { acc, tab in
             let size = openContentSize(for: tab)
             return CGSize(width: max(acc.width, size.width), height: max(acc.height, size.height))
         }

@@ -9,6 +9,9 @@ struct HistoryView: View {
     @State private var segments: [SessionManager.SegmentSummary] = []
     @State private var selected: SessionManager.SegmentSummary?
     @State private var detailMessages: [SessionManager.StoredMessage]?
+    @State private var renaming: SessionManager.SegmentSummary?
+    @State private var renameText = ""
+    @State private var pendingDelete: SessionManager.SegmentSummary?
 
     var body: some View {
         ZStack {
@@ -28,6 +31,46 @@ struct HistoryView: View {
         }
         .animation(.snappy(duration: 0.3), value: selected?.id)
         .task { segments = await sessions.recentSegments() }
+        .alert("Rename conversation", isPresented: Binding(
+            get: { renaming != nil },
+            set: { if !$0 { renaming = nil } }
+        )) {
+            TextField("Title", text: $renameText)
+            Button("Rename") {
+                if let segment = renaming {
+                    let title = renameText
+                    Task {
+                        await sessions.rename(segmentID: segment.id, title: title)
+                        segments = await sessions.recentSegments()
+                    }
+                }
+                renaming = nil
+            }
+            Button("Cancel", role: .cancel) { renaming = nil }
+        }
+        .confirmationDialog(
+            "Delete “\(pendingDelete.map(title(for:)) ?? "conversation")”?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let segment = pendingDelete {
+                    Task {
+                        await sessions.deleteSegment(segment.id)
+                        segments = await sessions.recentSegments()
+                    }
+                }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        }
+    }
+
+    private func title(for segment: SessionManager.SegmentSummary) -> String {
+        segment.title ?? (segment.preview.isEmpty ? "Conversation" : segment.preview)
     }
 
     // MARK: - List
@@ -50,7 +93,15 @@ struct HistoryView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(segments) { segment in
-                        ConversationCard(segment: segment) { open(segment) }
+                        ConversationCard(
+                            segment: segment,
+                            open: { open(segment) },
+                            rename: {
+                                renameText = segment.title ?? ""
+                                renaming = segment
+                            },
+                            delete: { pendingDelete = segment }
+                        )
                     }
                 }
                 .padding(.vertical, 12)
@@ -140,6 +191,8 @@ struct HistoryView: View {
 private struct ConversationCard: View {
     let segment: SessionManager.SegmentSummary
     let open: () -> Void
+    let rename: () -> Void
+    let delete: () -> Void
 
     @State private var isHovering = false
 
@@ -161,6 +214,35 @@ private struct ConversationCard: View {
                     .foregroundStyle(.white.opacity(0.55))
                 }
                 Spacer()
+
+                // Hover-revealed management, mirrored in the context menu.
+                if isHovering {
+                    HStack(spacing: 2) {
+                        Button(action: rename) {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.65))
+                                .frame(width: 24, height: 24)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .pointerStyle(.link)
+                        .accessibilityLabel("Rename conversation")
+
+                        Button(action: delete) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.65))
+                                .frame(width: 24, height: 24)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .pointerStyle(.link)
+                        .accessibilityLabel("Delete conversation")
+                    }
+                    .transition(.opacity)
+                }
+
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.45))
@@ -174,6 +256,10 @@ private struct ConversationCard: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.white.opacity(isHovering ? 0.09 : 0.05))
         )
+        .contextMenu {
+            Button("Rename…", action: rename)
+            Button("Delete", role: .destructive, action: delete)
+        }
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) { isHovering = hovering }
         }

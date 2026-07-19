@@ -7,7 +7,9 @@ import JStore
 /// segments on an idle gap. Memory extraction (M4) hooks the segment-close event.
 actor SessionManager {
     private let database: JarvisDatabase
-    private let idleGap: TimeInterval
+    /// Idle gap after which the next message starts a new conversation.
+    /// Any send resets the clock; user-configurable in Settings.
+    private var idleGap: TimeInterval
 
     private var sessionID: String?
     private var segmentID: String?
@@ -17,9 +19,13 @@ actor SessionManager {
     /// extraction can run.
     private var onSegmentClose: (@Sendable (String) -> Void)?
 
-    init(database: JarvisDatabase, idleGap: TimeInterval = 30 * 60) {
+    init(database: JarvisDatabase, idleGap: TimeInterval = 5 * 60) {
         self.database = database
         self.idleGap = idleGap
+    }
+
+    func setIdleGap(_ seconds: TimeInterval) {
+        idleGap = max(60, seconds)
     }
 
     func setOnSegmentClose(_ handler: @escaping @Sendable (String) -> Void) {
@@ -84,6 +90,31 @@ actor SessionManager {
         guard let segmentID else { return }
         try? await closeSegment(segmentID, reason: .shutdown, at: now)
         self.segmentID = nil
+    }
+
+    /// User-facing rename in the History tab. An empty title restores the
+    /// first-message preview.
+    func rename(segmentID: String, title: String) async {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = try? await database.writer.write { db in
+            try db.execute(
+                sql: "UPDATE segment SET title = ? WHERE id = ?",
+                arguments: [trimmed.isEmpty ? nil : trimmed, segmentID]
+            )
+        }
+    }
+
+    /// User-facing delete in the History tab: removes the conversation and its
+    /// messages. Deleting the live conversation starts a fresh one on next send.
+    func deleteSegment(_ id: String) async {
+        _ = try? await database.writer.write { db in
+            try db.execute(sql: "DELETE FROM message WHERE segment_id = ?", arguments: [id])
+            try Segment.deleteOne(db, key: id)
+        }
+        if segmentID == id {
+            segmentID = nil
+            lastActivity = .distantPast
+        }
     }
 
     private func openSegment(now: Date) async throws -> String {

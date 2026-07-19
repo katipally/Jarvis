@@ -99,6 +99,7 @@ struct NotchView: View {
         .animation(sizeAnimation, value: vm.state)
         .animation(tabAnimation, value: vm.selectedTab)
         .animation(sizeAnimation, value: showsListening)
+        .animation(tabAnimation, value: vm.homeBodyHeight) // answer-fitted growth
         .animation(.easeInOut(duration: 0.35), value: showsGlow)
     }
 
@@ -178,24 +179,24 @@ struct NotchView: View {
         }
     }
 
-    /// Tabs split left/right of the camera housing.
+    /// Tabs sit at FIXED offsets beside the camera housing: their distance from
+    /// the panel's center never changes, so per-tab width changes can't move
+    /// the icons out from under the pointer.
     @ViewBuilder
     private var headerRow: some View {
         if vm.state == .open {
             HStack(spacing: 0) {
+                Spacer(minLength: 0)
                 HStack(spacing: 22) {
                     tabButton(.home)
                     tabButton(.history)
                 }
-                .frame(maxWidth: .infinity)
-
-                Color.clear.frame(width: vm.closedNotchSize.width)
-
+                Color.clear.frame(width: vm.closedNotchSize.width + 28)
                 HStack(spacing: 22) {
                     tabButton(.activity)
                     tabButton(.settings)
                 }
-                .frame(maxWidth: .infinity)
+                Spacer(minLength: 0)
             }
             .padding(.top, 2)
             .transition(.opacity)
@@ -224,7 +225,13 @@ struct NotchView: View {
         if let core, let chat {
             switch vm.selectedTab {
             case .home:
-                HomeView(chat: chat, voice: voice)
+                HomeView(chat: chat, voice: voice) { bodyHeight in
+                    // Grow the notch to fit the answer (NotchViewModel caps at
+                    // half the screen); ignore sub-8pt jitter during streaming.
+                    if abs((vm.homeBodyHeight ?? 0) - bodyHeight) > 8 {
+                        vm.homeBodyHeight = bodyHeight
+                    }
+                }
             case .history:
                 HistoryView(sessions: chat.sessions)
             case .activity:

@@ -16,9 +16,16 @@ final class JarvisCore {
     private(set) var assignments: [AgentRole: RoleAssignment] = [:]
     private(set) var onboardingComplete = false
     private(set) var loaded = false
+    /// Minutes of inactivity after which the next message starts a new session.
+    private(set) var sessionGapMinutes = 5
+
+    /// Fired whenever the session gap changes (and once on load) so the
+    /// SessionManager can pick it up.
+    var onSessionGapChange: ((Int) -> Void)?
 
     private static let assignmentsKey = "role_assignments"
     private static let onboardingKey = "onboarding_complete"
+    private static let sessionGapKey = "session_gap_minutes"
 
     init(database: JarvisDatabase, cacheDirectory: URL) {
         self.database = database
@@ -39,8 +46,16 @@ final class JarvisCore {
             assignments = result
         }
         onboardingComplete = (try? await settings.get(Self.onboardingKey, as: Bool.self)) ?? false
+        sessionGapMinutes = (try? await settings.get(Self.sessionGapKey, as: Int.self)) ?? 5
+        onSessionGapChange?(sessionGapMinutes)
         loaded = true
         await catalog.refresh()
+    }
+
+    func setSessionGap(minutes: Int) async {
+        sessionGapMinutes = max(1, minutes)
+        onSessionGapChange?(sessionGapMinutes)
+        try? await settings.set(Self.sessionGapKey, to: sessionGapMinutes)
     }
 
     var isConfigured: Bool { assignments[.brain] != nil }
