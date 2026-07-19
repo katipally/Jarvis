@@ -27,6 +27,9 @@ struct HomeView: View {
     @State private var lastDistanceFromBottom: CGFloat = 0
     @State private var lastReportedBodyHeight: CGFloat = 0
     @State private var repinTask: Task<Void, Never>?
+    /// Incremented by the "Back to latest" button; observed inside the
+    /// ScrollViewReader where the proxy lives.
+    @State private var returnToLatestRequest = 0
 
     /// Comfortable body height for the greeting (no conversation yet).
     private let greetingBaseHeight: CGFloat = 190
@@ -60,9 +63,10 @@ struct HomeView: View {
         // instead of collapsing and re-growing.
         if chat.phase == .responding, answerMessages.isEmpty { return }
         let content = answerMessages.isEmpty ? greetingBaseHeight : answerHeight
-        // +14 covers the inter-row gap above the answer when history precedes it,
-        // so the answer's first line never sits inside the top fade.
-        let spacingAllowance: CGFloat = priorMessages.isEmpty ? 16 : 30
+        // Allowance = bottom padding (10) + a slice of the 14pt gap above the
+        // answer. Must stay ≤ 24 or the previous bubble's bottom edge leaks
+        // into the top of the frame.
+        let spacingAllowance: CGFloat = priorMessages.isEmpty ? 16 : 17
         let newValue = content + composerHeight + spacingAllowance
         if abs(newValue - lastReportedBodyHeight) > 8 {
             // This report will resize the panel — don't let the resulting
@@ -76,8 +80,18 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             transcript
-            composer
+            // While browsing history the composer folds into a single compact
+            // button, freeing its space for reading. Clicking it is the ONLY
+            // way back to the focused view — scrolling never snaps back.
+            if scrollMode == .browsing {
+                backToLatestButton
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            } else {
+                composer
+                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .bottom)))
+            }
         }
+        .animation(.snappy(duration: 0.25), value: scrollMode == .browsing)
         .dropDestination(for: URL.self) { urls, _ in
             for url in urls {
                 if let attachment = AttachmentLoader.load(url: url) {
@@ -149,46 +163,45 @@ struct HomeView: View {
                     withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
                 }
             }
-            // Deterministic pinned/browsing state machine. The panel resizing
-            // itself changes the scroll geometry, so raw thresholding oscillates;
-            // instead: our own resizes are suppressed, drift while pinned is
-            // silently re-pinned, and mode flips need a clear user gesture.
+            // One-way state machine: scrolling up enters browsing; NOTHING the
+            // scroll does ever leaves it (only the button, a send, or a fresh
+            // panel-open do). Resizes therefore can't feed back into mode
+            // changes — the oscillation class of bugs is impossible.
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 geometry.contentSize.height
                     - (geometry.contentOffset.y + geometry.containerSize.height)
             } action: { _, distance in
                 lastDistanceFromBottom = distance
-                guard Date.now >= suppressGeometryUntil else { return }
-                switch scrollMode {
-                case .pinned:
-                    if distance > 44 {
-                        // Real upward scroll: enter browsing and let the panel
-                        // open to reading height.
-                        scrollMode = .browsing
-                        onBrowsingChange(true)
-                        suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
-                    } else if distance > 6 {
-                        // Drift from our own resize/streaming: quietly re-pin.
-                        repinTask?.cancel()
-                        repinTask = Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(200))
-                            guard !Task.isCancelled, scrollMode == .pinned,
-                                  lastDistanceFromBottom > 6 else { return }
-                            var transaction = Transaction()
-                            transaction.disablesAnimations = true
-                            withTransaction(transaction) { proxy.scrollTo("live-bottom", anchor: .bottom) }
-                        }
-                    }
-                case .browsing:
-                    if distance < 6 {
-                        // Back at the latest answer: settle, shrink to fit, and
-                        // keep the view glued through the shrink.
-                        scrollMode = .pinned
-                        onBrowsingChange(false)
-                        suppressGeometryUntil = Date.now.addingTimeInterval(0.6)
-                        withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
+                guard scrollMode == .pinned else { return } // browsing scrolls freely
+                if Date.now >= suppressGeometryUntil, distance > 44 {
+                    // Real upward scroll: enter browsing and open reading room.
+                    scrollMode = .browsing
+                    onBrowsingChange(true)
+                    suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
+                } else if distance > 6 {
+                    // Drift from our own resizes/streaming/restore: quietly
+                    // re-pin once things settle. Scheduled even while geometry
+                    // is suppressed — the task itself waits the suppression out,
+                    // so pinned mode always converges to the bottom.
+                    let wait = max(0.2, suppressGeometryUntil.timeIntervalSinceNow + 0.15)
+                    repinTask?.cancel()
+                    repinTask = Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(wait))
+                        guard !Task.isCancelled, scrollMode == .pinned,
+                              lastDistanceFromBottom > 6 else { return }
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { proxy.scrollTo("live-bottom", anchor: .bottom) }
                     }
                 }
+            }
+            // The button's return path needs the proxy: run it via state change.
+            .onChange(of: returnToLatestRequest) { _, _ in
+                guard scrollMode == .browsing else { return }
+                scrollMode = .pinned
+                onBrowsingChange(false)
+                suppressGeometryUntil = Date.now.addingTimeInterval(0.6)
+                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
             }
         }
         .defaultScrollAnchor(.bottom)
@@ -204,6 +217,37 @@ struct HomeView: View {
                     .frame(height: 8)
             }
         }
+    }
+
+    /// Replaces the composer while browsing history: one compact affordance
+    /// that returns to the fitted, answer-focused view.
+    private var backToLatestButton: some View {
+        Button {
+            returnToLatestRequest += 1
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("Back to latest")
+                    .font(.jarvisCaption.weight(.medium))
+            }
+            .foregroundStyle(.white.opacity(0.85))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(Color.jarvisSurfaceHover)
+                    .strokeBorder(Color.jarvisStroke, lineWidth: 1)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .keyboardShortcut(.cancelAction)
+        .accessibilityLabel("Back to the latest message")
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
+        .padding(.bottom, 2)
     }
 
     private var composer: some View {
@@ -234,7 +278,7 @@ struct HomeView: View {
                 .textFieldStyle(.plain)
                 .font(.jarvisBody)
                 .foregroundStyle(.white)
-                .lineLimit(1...4)
+                .lineLimit(1...3) // grows to 3 lines, then the text scrolls inside
                 .focused($inputFocused)
                 .onChange(of: chat.input) { chat.draftChanged() }
                 .onSubmit(send)
@@ -277,7 +321,7 @@ struct HomeView: View {
             }
             .padding(.leading, 16)
             .padding(.trailing, 8)
-            .padding(.vertical, 7)
+            .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(.white.opacity(0.10))

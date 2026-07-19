@@ -229,7 +229,7 @@ struct NotchView: View {
                 HomeView(chat: chat, voice: voice) { bodyHeight in
                     // Grow the notch to fit the answer (NotchViewModel caps at
                     // half the screen); ignore sub-8pt jitter during streaming.
-                    if abs((vm.homeBodyHeight ?? 0) - bodyHeight) > 8 {
+                    if abs((vm.homeBodyHeight ?? 0) - bodyHeight) > 4 {
                         vm.homeBodyHeight = bodyHeight
                     }
                 } onBrowsingChange: { browsing in
