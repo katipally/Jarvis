@@ -18,6 +18,16 @@ struct HomeView: View {
     @State private var answerHeight: CGFloat = 0
     @State private var composerHeight: CGFloat = 0
 
+    /// Pinned = glued to the latest answer; browsing = reading history.
+    private enum ScrollMode { case pinned, browsing }
+    @State private var scrollMode: ScrollMode = .pinned
+    /// Geometry changes caused by our own panel resizes are ignored until this
+    /// instant so the resize can't re-trigger itself (the oscillation bug).
+    @State private var suppressGeometryUntil = Date.distantPast
+    @State private var lastDistanceFromBottom: CGFloat = 0
+    @State private var lastReportedBodyHeight: CGFloat = 0
+    @State private var repinTask: Task<Void, Never>?
+
     /// Comfortable body height for the greeting (no conversation yet).
     private let greetingBaseHeight: CGFloat = 190
 
@@ -53,7 +63,14 @@ struct HomeView: View {
         // +14 covers the inter-row gap above the answer when history precedes it,
         // so the answer's first line never sits inside the top fade.
         let spacingAllowance: CGFloat = priorMessages.isEmpty ? 16 : 30
-        onBodyHeightChange(content + composerHeight + spacingAllowance)
+        let newValue = content + composerHeight + spacingAllowance
+        if abs(newValue - lastReportedBodyHeight) > 8 {
+            // This report will resize the panel — don't let the resulting
+            // geometry churn masquerade as a user scroll.
+            lastReportedBodyHeight = newValue
+            suppressGeometryUntil = max(suppressGeometryUntil, Date.now.addingTimeInterval(0.45))
+        }
+        onBodyHeightChange(newValue)
     }
 
     var body: some View {
@@ -126,18 +143,55 @@ struct HomeView: View {
             // had scrolled up into history (iMessage behavior).
             .onChange(of: chat.phase) { _, phase in
                 if phase == .responding {
+                    scrollMode = .pinned
+                    onBrowsingChange(false)
+                    suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
                     withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
+                }
+            }
+            // Deterministic pinned/browsing state machine. The panel resizing
+            // itself changes the scroll geometry, so raw thresholding oscillates;
+            // instead: our own resizes are suppressed, drift while pinned is
+            // silently re-pinned, and mode flips need a clear user gesture.
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentSize.height
+                    - (geometry.contentOffset.y + geometry.containerSize.height)
+            } action: { _, distance in
+                lastDistanceFromBottom = distance
+                guard Date.now >= suppressGeometryUntil else { return }
+                switch scrollMode {
+                case .pinned:
+                    if distance > 44 {
+                        // Real upward scroll: enter browsing and let the panel
+                        // open to reading height.
+                        scrollMode = .browsing
+                        onBrowsingChange(true)
+                        suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
+                    } else if distance > 6 {
+                        // Drift from our own resize/streaming: quietly re-pin.
+                        repinTask?.cancel()
+                        repinTask = Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(200))
+                            guard !Task.isCancelled, scrollMode == .pinned,
+                                  lastDistanceFromBottom > 6 else { return }
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) { proxy.scrollTo("live-bottom", anchor: .bottom) }
+                        }
+                    }
+                case .browsing:
+                    if distance < 6 {
+                        // Back at the latest answer: settle, shrink to fit, and
+                        // keep the view glued through the shrink.
+                        scrollMode = .pinned
+                        onBrowsingChange(false)
+                        suppressGeometryUntil = Date.now.addingTimeInterval(0.6)
+                        withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
+                    }
                 }
             }
         }
         .defaultScrollAnchor(.bottom)
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            let distanceFromBottom = geometry.contentSize.height
-                - (geometry.contentOffset.y + geometry.containerSize.height)
-            return distanceFromBottom > 40
-        } action: { _, browsing in
-            onBrowsingChange(browsing)
-        }
         .scrollIndicators(.hidden)
         .mask {
             // Content dissolves at the edges instead of clipping hard. Kept
@@ -182,6 +236,7 @@ struct HomeView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1...4)
                 .focused($inputFocused)
+                .onChange(of: chat.input) { chat.draftChanged() }
                 .onSubmit(send)
                 .onKeyPress(.return) {
                     if NSEvent.modifierFlags.contains(.shift) { return .ignored }
@@ -225,9 +280,13 @@ struct HomeView: View {
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(.white.opacity(0.08))
-                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1))
+                    .fill(.white.opacity(0.10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(.white.opacity(inputFocused ? 0.28 : 0.16), lineWidth: 1)
+                    )
             )
+            .animation(.easeOut(duration: 0.15), value: inputFocused)
         }
         .padding(.top, 4)
         .animation(.snappy, value: chat.errorText)
@@ -306,11 +365,11 @@ private struct GreetingView: View {
                 Text(context.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))
                     .font(.system(size: 12))
                     .monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.white.opacity(0.6))
             }
             Text("Ask anything, or drop a file to attach")
                 .font(.jarvisCaption)
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(.white.opacity(0.55))
                 .padding(.top, 2)
             Spacer()
         }
@@ -342,7 +401,11 @@ struct MessageRow: View {
                             .foregroundStyle(.white.opacity(0.85))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.12)))
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(Color.jarvisSurfaceActive)
+                                    .strokeBorder(Color.jarvisStroke, lineWidth: 1)
+                            )
                     }
                 }
             }
@@ -412,7 +475,7 @@ private struct ToolRow: View {
                     }
                     Text(message.toolName ?? "tool")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.8))
                     if message.toolState == .running {
                         Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
                             .font(.jarvisFootnote)
@@ -446,7 +509,11 @@ private struct ToolRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.06)))
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.jarvisSurface)
+                .strokeBorder(Color.jarvisStroke, lineWidth: 1)
+        )
     }
 }
 

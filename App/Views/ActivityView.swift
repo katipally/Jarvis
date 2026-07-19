@@ -71,7 +71,7 @@ private struct RunsPane: View {
                                 }
                             }
                             .padding(12)
-                            .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.05)))
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color.jarvisSurface))
                         }
                     }
                     .padding(.bottom, 10)
@@ -117,7 +117,7 @@ private struct DecisionsPane: View {
                                     .foregroundStyle(.white.opacity(0.55))
                             }
                             .padding(12)
-                            .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.05)))
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color.jarvisSurface))
                         }
                     }
                     .padding(.bottom, 10)

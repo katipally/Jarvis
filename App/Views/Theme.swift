@@ -26,3 +26,15 @@ extension Font {
     static let jarvisCaption = Font.system(size: 11)
     static let jarvisFootnote = Font.system(size: 10)
 }
+
+// MARK: - Surfaces on the pure-black notch
+
+extension Color {
+    /// Card / pill / row fill — bright enough to separate from the black body.
+    static let jarvisSurface = Color.white.opacity(0.08)
+    static let jarvisSurfaceHover = Color.white.opacity(0.13)
+    /// Emphasized surface (user bubbles, selected states).
+    static let jarvisSurfaceActive = Color.white.opacity(0.15)
+    /// Hairline stroke that keeps surfaces from dissolving into the background.
+    static let jarvisStroke = Color.white.opacity(0.10)
+}

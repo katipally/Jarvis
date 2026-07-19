@@ -272,7 +272,7 @@ private struct TabButton: View {
         Button(action: action) {
             Image(systemName: tab.symbol)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isSelected ? .white : .white.opacity(0.45))
+                .foregroundStyle(isSelected ? .white : .white.opacity(0.58))
                 .frame(width: 30, height: 26)
                 .background {
                     if isSelected {

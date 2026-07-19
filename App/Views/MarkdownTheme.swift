@@ -7,7 +7,7 @@ extension MarkdownUI.Theme {
     static var jarvis: MarkdownUI.Theme {
         MarkdownUI.Theme()
             .text {
-                ForegroundColor(.white.opacity(0.9))
+                ForegroundColor(.white.opacity(0.95))
                 FontSize(13)
             }
             .code {

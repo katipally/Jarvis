@@ -254,7 +254,8 @@ private struct ConversationCard: View {
         .pointerStyle(.link)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.white.opacity(isHovering ? 0.09 : 0.05))
+                .fill(isHovering ? Color.jarvisSurfaceHover : Color.jarvisSurface)
+                .strokeBorder(Color.jarvisStroke, lineWidth: 1)
         )
         .contextMenu {
             Button("Rename…", action: rename)

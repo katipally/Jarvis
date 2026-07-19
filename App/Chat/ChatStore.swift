@@ -122,6 +122,31 @@ final class ChatStore {
         // relaunching shows where you left off; the greeting appears only when
         // there is no history at all. Scroll-up pages further back.
         loadOlderHistory()
+        // A half-typed message survives a relaunch.
+        let settings = core.settings
+        Task { @MainActor [weak self] in
+            if let draft = try? await settings.get(Self.draftKey, as: String.self),
+               !draft.isEmpty, let self, self.input.isEmpty {
+                self.input = draft
+            }
+        }
+    }
+
+    // MARK: - Draft persistence
+
+    private static let draftKey = "draft_input"
+    private var draftTask: Task<Void, Never>?
+
+    /// Debounced draft save, called on every composer keystroke.
+    func draftChanged() {
+        draftTask?.cancel()
+        let settings = core.settings
+        let value = input
+        draftTask = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            try? await settings.set(Self.draftKey, to: value)
+        }
     }
 
     var canSend: Bool {
@@ -155,6 +180,11 @@ final class ChatStore {
         phase = .responding
         activeAssistantID = nil
         pendingToolResults = []
+
+        // The message left the composer — clear the persisted draft.
+        draftTask?.cancel()
+        let settingsStore = core.settings
+        Task { try? await settingsStore.set(Self.draftKey, to: "") }
 
         let runID = UUID().uuidString
         let artifactStore = agent.artifactStore

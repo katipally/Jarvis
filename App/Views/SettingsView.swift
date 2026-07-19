@@ -71,7 +71,7 @@ struct SettingsView: View {
                 .fixedSize()
             }
             .padding(14)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.05)))
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.jarvisSurface))
         }
     }
 
@@ -121,7 +121,7 @@ struct SettingsView: View {
             .accessibilityLabel("Remove \(account.label ?? account.provider.capitalized)")
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.jarvisSurface))
     }
 
     @ViewBuilder
@@ -222,7 +222,7 @@ struct SettingsView: View {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.jarvisSurface))
     }
 
     // MARK: - Reusable
@@ -374,7 +374,7 @@ private struct AddProviderForm: View {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.06)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.jarvisSurface))
         .onAppear {
             if baseURL.isEmpty { baseURL = ProviderPreset.defaultBaseURL(for: provider.rawValue).absoluteString }
         }

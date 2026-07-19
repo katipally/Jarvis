@@ -38,7 +38,7 @@ struct PermissionsDashboard: View {
             statusControl(permission, state)
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.jarvisSurface))
     }
 
     @ViewBuilder

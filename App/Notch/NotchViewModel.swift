@@ -34,7 +34,9 @@ final class NotchViewModel {
     }
 
     private(set) var state: State = .closed
-    var selectedTab: Tab = .home
+    var selectedTab: Tab = Tab(rawValue: UserDefaults.standard.string(forKey: "jarvis.selectedTab") ?? "") ?? .home {
+        didSet { UserDefaults.standard.set(selectedTab.rawValue, forKey: "jarvis.selectedTab") }
+    }
     private(set) var closedNotchSize: CGSize
     private(set) var screenFrame: CGRect
     let displayID: CGDirectDisplayID
