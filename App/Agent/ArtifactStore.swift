@@ -12,8 +12,9 @@ struct ArtifactStore: Sendable {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    /// Returns a reference like `artifact:<id>` the model can pass to `read_artifact`.
-    func spill(runID: String, toolName: String, content: String) async -> String {
+    /// Returns a reference like `artifact:<id>` the model can pass to
+    /// `read_artifact`, plus the row id for tool_call bookkeeping.
+    func spill(runID: String, toolName: String, content: String) async -> (ref: String, artifactID: String) {
         let id = UUID().uuidString
         let path = directory.appendingPathComponent("\(id).txt")
         try? content.write(to: path, atomically: true, encoding: .utf8)
@@ -23,7 +24,7 @@ struct ArtifactStore: Sendable {
             bytes: content.utf8.count, preview: String(content.prefix(200))
         )
         _ = try? await database.writer.write { try row.insert($0) }
-        return "artifact:\(id)"
+        return ("artifact:\(id)", id)
     }
 
     func read(ref: String) async -> String? {

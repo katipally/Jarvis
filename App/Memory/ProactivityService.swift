@@ -96,7 +96,7 @@ final class ProactivityService {
     private func fireDueCron() async {
         guard hasBudget() else { return }
         for job in await agent.cronStore.dueJobs() {
-            let (text, usage) = await runBackground(prompt: job.prompt)
+            let (text, usage) = await runBackground(prompt: job.prompt, kind: "cron", label: "cron: \(job.name)")
             addBudget(usage.inputTokens + usage.outputTokens)
             await agent.cronStore.markRan(id: job.id, status: text.isEmpty ? "empty" : "done")
             await deliver(body: text, trigger: "cron", dedupKey: "cron:\(job.id)", frameID: nil)
@@ -113,7 +113,7 @@ final class ProactivityService {
         timely to tell them right now? If yes, reply with one short helpful message. If not, reply \
         with exactly: NOTHING.
         """
-        let (text, usage) = await runBackground(prompt: prompt)
+        let (text, usage) = await runBackground(prompt: prompt, kind: "heartbeat", label: "heartbeat")
         addBudget(usage.inputTokens + usage.outputTokens)
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         await agent.cronStore.setHeartbeatRun(.now, result: trimmed.isEmpty ? "nothing" : "nudged")
@@ -131,8 +131,13 @@ final class ProactivityService {
         chat.receiveProactive(clean)
     }
 
-    private func runBackground(prompt: String) async -> (String, Usage) {
+    /// Runs a background agent turn AND records it like a foreground run —
+    /// kind/label/tool calls/tokens/cost all land in Activity.
+    private func runBackground(prompt: String, kind: String, label: String) async -> (String, Usage) {
         guard let resolved = core.resolve(.brain) else { return ("", Usage()) }
+        let runID = UUID().uuidString
+        let runStore = agent.runStore
+        await runStore.createRun(id: runID, kind: kind, segmentID: nil, initiator: "jarvis", label: label)
         let loop = AgentLoop(
             adapter: resolved.adapter, tools: agent.tools, gate: agent.gate,
             config: .init(model: resolved.model, system: Self.backgroundSystem, effort: resolved.effort,
@@ -140,10 +145,19 @@ final class ProactivityService {
         )
         var text = ""
         var usage = Usage()
-        for await event in loop.run(initial: [.user(prompt)], runID: UUID().uuidString) {
-            if case .assistantMessage(let m) = event, !m.plainText.isEmpty { text = m.plainText }
-            if case .usage(let u) = event { usage.inputTokens += u.inputTokens; usage.outputTokens += u.outputTokens }
+        for await event in loop.run(initial: [.user(prompt)], runID: runID) {
+            switch event {
+            case .assistantMessage(let m) where !m.plainText.isEmpty: text = m.plainText
+            case .toolCallStarted(let id, let name, let input):
+                await runStore.toolStarted(id: id, runID: runID, name: name, input: input)
+            case .toolCallFinished(let id, let output, let isError, let artifactID):
+                await runStore.toolFinished(id: id, state: isError ? "error" : "done", preview: output, artifactID: artifactID)
+            case .usage(let u): usage.add(u)
+            default: break
+            }
         }
+        let cost = await core.capability(forAccount: resolved.account.id, model: resolved.model)?.cost(of: usage)
+        await runStore.finishRun(id: runID, status: text.isEmpty ? "empty" : "done", usage: usage, error: nil, costUSD: cost)
         return (text, usage)
     }
 

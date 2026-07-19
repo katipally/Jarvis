@@ -63,6 +63,7 @@ public struct MessageRecord: Codable, Sendable, Identifiable, FetchableRecord, P
 
     public enum Role: String, Codable, Sendable { case user, assistant, system, tool }
     public enum Status: String, Codable, Sendable { case streaming, complete, aborted, error }
+    public enum Kind: String, Codable, Sendable { case chat, summary }
 
     public var id: String
     public var segmentId: String
@@ -76,6 +77,9 @@ public struct MessageRecord: Codable, Sendable, Identifiable, FetchableRecord, P
     public var inputTokens: Int?
     public var outputTokens: Int?
     public var createdAt: Date
+    /// False for rows replaced by a compaction summary — kept, never deleted.
+    public var active: Bool
+    public var kind: String
 
     public init(
         id: String = UUID().uuidString,
@@ -89,7 +93,9 @@ public struct MessageRecord: Codable, Sendable, Identifiable, FetchableRecord, P
         provider: String? = nil,
         inputTokens: Int? = nil,
         outputTokens: Int? = nil,
-        createdAt: Date = .now
+        createdAt: Date = .now,
+        active: Bool = true,
+        kind: Kind = .chat
     ) {
         self.id = id
         self.segmentId = segmentId
@@ -103,6 +109,8 @@ public struct MessageRecord: Codable, Sendable, Identifiable, FetchableRecord, P
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.createdAt = createdAt
+        self.active = active
+        self.kind = kind.rawValue
     }
 }
 

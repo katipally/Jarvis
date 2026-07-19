@@ -8,7 +8,7 @@ struct HistoryView: View {
     let sessions: SessionManager
     @State private var segments: [SessionManager.SegmentSummary] = []
     @State private var selected: SessionManager.SegmentSummary?
-    @State private var detailMessages: [SessionManager.StoredMessage]?
+    @State private var detailMessages: [DisplayMessage]?
     @State private var renaming: SessionManager.SegmentSummary?
     @State private var renameText = ""
     @State private var pendingDelete: SessionManager.SegmentSummary?
@@ -122,7 +122,8 @@ struct HistoryView: View {
         selected = segment
         Task {
             let loaded = await sessions.messages(inSegment: segment.id)
-            withAnimation(.snappy(duration: 0.25)) { detailMessages = loaded }
+            let rows = DisplayMessage.rows(from: loaded)
+            withAnimation(.snappy(duration: 0.25)) { detailMessages = rows }
         }
     }
 
@@ -163,8 +164,8 @@ struct HistoryView: View {
             if let detailMessages {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(detailMessages) { stored in
-                            MessageRow(message: DisplayMessage(stored: stored))
+                        ForEach(detailMessages) { row in
+                            MessageRow(message: row)
                         }
                     }
                     .padding(.vertical, 6)

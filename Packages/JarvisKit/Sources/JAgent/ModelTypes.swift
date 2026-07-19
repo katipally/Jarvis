@@ -70,12 +70,29 @@ public struct ModelRequest: Sendable {
 }
 
 public struct Usage: Sendable, Equatable {
+    /// Uncached prompt tokens (cache reads/writes are reported separately —
+    /// they bill at different rates).
     public var inputTokens: Int
     public var outputTokens: Int
+    public var cacheReadTokens: Int
+    public var cacheWriteTokens: Int
 
-    public init(inputTokens: Int = 0, outputTokens: Int = 0) {
+    public init(inputTokens: Int = 0, outputTokens: Int = 0,
+                cacheReadTokens: Int = 0, cacheWriteTokens: Int = 0) {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheWriteTokens = cacheWriteTokens
+    }
+
+    /// Total prompt size regardless of caching (for context budgets).
+    public var promptTokens: Int { inputTokens + cacheReadTokens + cacheWriteTokens }
+
+    public mutating func add(_ other: Usage) {
+        inputTokens += other.inputTokens
+        outputTokens += other.outputTokens
+        cacheReadTokens += other.cacheReadTokens
+        cacheWriteTokens += other.cacheWriteTokens
     }
 }
 

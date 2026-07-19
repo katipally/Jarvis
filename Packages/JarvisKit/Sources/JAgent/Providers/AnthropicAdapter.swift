@@ -82,11 +82,11 @@ public struct AnthropicAdapter: ProviderAdapter {
         case "message_start":
             if let message = obj["message"] as? [String: Any],
                let usage = message["usage"] as? [String: Any] {
-                // Cached tokens are billed differently but are still real prompt
-                // size — fold them in so budgets and cost stay truthful.
-                state.inputTokens = (usage["input_tokens"] as? Int ?? 0)
-                    + (usage["cache_read_input_tokens"] as? Int ?? 0)
-                    + (usage["cache_creation_input_tokens"] as? Int ?? 0)
+                // Cache reads/writes bill at different rates — keep them apart;
+                // Usage.promptTokens re-folds them for context budgets.
+                state.inputTokens = usage["input_tokens"] as? Int ?? 0
+                state.cacheReadTokens = usage["cache_read_input_tokens"] as? Int ?? 0
+                state.cacheWriteTokens = usage["cache_creation_input_tokens"] as? Int ?? 0
             }
 
         case "content_block_start":
@@ -140,7 +140,10 @@ public struct AnthropicAdapter: ProviderAdapter {
             }
 
         case "message_stop":
-            continuation.yield(.usage(Usage(inputTokens: state.inputTokens, outputTokens: state.outputTokens)))
+            continuation.yield(.usage(Usage(
+                inputTokens: state.inputTokens, outputTokens: state.outputTokens,
+                cacheReadTokens: state.cacheReadTokens, cacheWriteTokens: state.cacheWriteTokens
+            )))
             continuation.yield(.stop(state.stopReason))
 
         case "error":
@@ -273,6 +276,8 @@ public struct AnthropicAdapter: ProviderAdapter {
 private struct AnthropicStreamState {
     var inputTokens = 0
     var outputTokens = 0
+    var cacheReadTokens = 0
+    var cacheWriteTokens = 0
     var stopReason: StopReason = .endTurn
     var toolIDByIndex: [Int: String] = [:]
     var thinkingIndexes: Set<Int> = []

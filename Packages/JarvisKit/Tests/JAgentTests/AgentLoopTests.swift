@@ -82,7 +82,7 @@ private func toolCallTurn(id: String, name: String, argsJSON: String) -> [ModelS
     var finalText = ""
     for await event in loop.run(initial: [.user("hi")], runID: "r1") {
         switch event {
-        case .toolCallFinished(_, let out, let isErr): toolFinished = out.contains("echoed") && !isErr
+        case .toolCallFinished(_, let out, let isErr, _): toolFinished = out.contains("echoed") && !isErr
         case .assistantMessage(let m) where !m.plainText.isEmpty: finalText = m.plainText
         default: break
         }
@@ -109,7 +109,7 @@ private func toolCallTurn(id: String, name: String, argsJSON: String) -> [ModelS
 
     var deniedOrUnknown = false
     for await event in loop.run(initial: [.user("hi")], runID: "r1") {
-        if case .toolCallFinished(_, let out, let isErr) = event {
+        if case .toolCallFinished(_, let out, let isErr, _) = event {
             // Background strips external tools from the registry, so it's unknown; either way it fails closed.
             deniedOrUnknown = isErr && (out.contains("Denied") || out.contains("Unknown"))
         }
@@ -133,7 +133,7 @@ private func toolCallTurn(id: String, name: String, argsJSON: String) -> [ModelS
 
     var denied = false
     for await event in loop.run(initial: [.user("hi")], runID: "r1") {
-        if case .toolCallFinished(_, let out, let isErr) = event { denied = isErr && out.contains("Denied") }
+        if case .toolCallFinished(_, let out, let isErr, _) = event { denied = isErr && out.contains("Denied") }
     }
     #expect(denied)
     let logged = await store.events()
@@ -156,7 +156,7 @@ private func toolCallTurn(id: String, name: String, argsJSON: String) -> [ModelS
 
     var denied = false
     for await event in loop.run(initial: [.user("hi")], runID: "r1") {
-        if case .toolCallFinished(_, let out, let isErr) = event { denied = isErr && out.contains("Denied") }
+        if case .toolCallFinished(_, let out, let isErr, _) = event { denied = isErr && out.contains("Denied") }
     }
     #expect(denied)
     let logged = await store.events()
@@ -185,7 +185,7 @@ private func toolCallTurn(id: String, name: String, argsJSON: String) -> [ModelS
 
     var echoed = false
     for await event in loop.run(initial: [.user("hi")], runID: "r1") {
-        if case .toolCallFinished(_, let out, let isErr) = event { echoed = !isErr && out.contains("echoed") }
+        if case .toolCallFinished(_, let out, let isErr, _) = event { echoed = !isErr && out.contains("echoed") }
     }
     #expect(echoed)
     let remembered = await store.remembered

@@ -279,6 +279,22 @@ public final class JarvisDatabase: Sendable {
             try db.create(index: "approval_event_on_created", on: "approval_event", columns: ["created_at"])
         }
 
+        migrator.registerMigration("v7_harness") { db in
+            try db.alter(table: "message") { t in
+                // Compaction flips replaced rows to active=0 (never deletes);
+                // kind='summary' rows carry the replacement summary.
+                t.add(column: "active", .boolean).notNull().defaults(to: true)
+                t.add(column: "kind", .text).notNull().defaults(to: "chat") // chat | summary
+            }
+            try db.alter(table: "run") { t in
+                t.add(column: "cost_usd", .double)
+                t.add(column: "total_cache_read_tokens", .integer).notNull().defaults(to: 0)
+                t.add(column: "label", .text) // short purpose line for Activity
+            }
+            try db.drop(table: "compaction_checkpoint") // created in v1, never used
+            try db.create(index: "message_on_run", on: "message", columns: ["run_id"])
+        }
+
         return migrator
     }
 }

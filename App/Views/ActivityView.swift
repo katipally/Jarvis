@@ -52,10 +52,16 @@ private struct RunsPane: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     statusDot(run.status)
-                                    Text(run.kind.capitalized)
+                                    Text(run.label ?? run.kind.capitalized)
                                         .font(.jarvisRow)
                                         .foregroundStyle(.white.opacity(0.85))
+                                        .lineLimit(1)
                                     Spacer()
+                                    if let cost = run.costUsd {
+                                        Text(cost < 0.01 ? "<$0.01" : String(format: "$%.2f", cost))
+                                            .font(.jarvisFootnote).monospacedDigit()
+                                            .foregroundStyle(.white.opacity(0.45))
+                                    }
                                     Text(run.startedAt.formatted(date: .omitted, time: .shortened))
                                         .font(.jarvisFootnote).monospacedDigit()
                                         .foregroundStyle(.white.opacity(0.55))

@@ -55,7 +55,7 @@ public struct AgentLoop: Sendable {
     let config: Config
     let transform: (@Sendable ([NeutralMessage]) async -> [NeutralMessage])?
     let steering: (@Sendable () async -> [NeutralMessage])?
-    let spill: (@Sendable (_ toolName: String, _ content: String) async -> String)?
+    let spill: (@Sendable (_ toolName: String, _ content: String) async -> (ref: String, artifactID: String))?
 
     public init(
         adapter: any ProviderAdapter,
@@ -64,7 +64,7 @@ public struct AgentLoop: Sendable {
         config: Config,
         transform: (@Sendable ([NeutralMessage]) async -> [NeutralMessage])? = nil,
         steering: (@Sendable () async -> [NeutralMessage])? = nil,
-        spill: (@Sendable (_ toolName: String, _ content: String) async -> String)? = nil
+        spill: (@Sendable (_ toolName: String, _ content: String) async -> (ref: String, artifactID: String))? = nil
     ) {
         // Background runs can only ever see read-only tools.
         self.adapter = adapter
@@ -189,12 +189,14 @@ public struct AgentLoop: Sendable {
                             }
 
                             var content = output.content
+                            var artifactID: String?
                             if content.count > Self.spillThreshold, let spill {
-                                let ref = await spill(use.name, content)
+                                let spilled = await spill(use.name, content)
+                                artifactID = spilled.artifactID
                                 content = String(content.prefix(2000)) +
-                                    "\n\n…[output truncated; full result saved as \(ref). Use read_artifact to read it.]"
+                                    "\n\n…[output truncated; full result saved as \(spilled.ref). Use read_artifact to read it.]"
                             }
-                            continuation.yield(.toolCallFinished(id: use.id, output: content, isError: output.isError))
+                            continuation.yield(.toolCallFinished(id: use.id, output: content, isError: output.isError, artifactID: artifactID))
                             resultBlocks.append(.toolResult(toolUseId: use.id, content: content, isError: output.isError, images: output.images))
                         }
 

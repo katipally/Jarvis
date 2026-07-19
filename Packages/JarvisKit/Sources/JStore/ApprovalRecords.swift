@@ -89,7 +89,7 @@ public struct RunRow: Codable, Sendable, Identifiable, FetchableRecord, Persista
     public static let databaseColumnDecodingStrategy = DatabaseColumnDecodingStrategy.convertFromSnakeCase
 
     public var id: String
-    public var kind: String // foreground | background | cron | nudge
+    public var kind: String // foreground | cron | heartbeat | nudge
     public var segmentId: String?
     public var initiator: String?
     public var status: String
@@ -98,10 +98,15 @@ public struct RunRow: Codable, Sendable, Identifiable, FetchableRecord, Persista
     public var error: String?
     public var totalInputTokens: Int
     public var totalOutputTokens: Int
+    public var totalCacheReadTokens: Int
+    public var costUsd: Double?
+    /// Short purpose line shown in Activity ("cron: standup", "heartbeat").
+    public var label: String?
 
     public init(id: String = UUID().uuidString, kind: String, segmentId: String? = nil, initiator: String? = nil,
                 status: String, startedAt: Date = .now, endedAt: Date? = nil, error: String? = nil,
-                totalInputTokens: Int = 0, totalOutputTokens: Int = 0) {
+                totalInputTokens: Int = 0, totalOutputTokens: Int = 0, totalCacheReadTokens: Int = 0,
+                costUsd: Double? = nil, label: String? = nil) {
         self.id = id
         self.kind = kind
         self.segmentId = segmentId
@@ -112,6 +117,9 @@ public struct RunRow: Codable, Sendable, Identifiable, FetchableRecord, Persista
         self.error = error
         self.totalInputTokens = totalInputTokens
         self.totalOutputTokens = totalOutputTokens
+        self.totalCacheReadTokens = totalCacheReadTokens
+        self.costUsd = costUsd
+        self.label = label
     }
 }
 

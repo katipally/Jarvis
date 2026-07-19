@@ -146,7 +146,7 @@ actor SessionManager {
     @discardableResult
     func append(role: MessageRole, content: [ContentBlock], status: MessageRecord.Status,
                 runId: String? = nil, model: String? = nil, provider: String? = nil,
-                usage: Usage? = nil, now: Date = .now) async throws -> String {
+                usage: Usage? = nil, kind: MessageRecord.Kind = .chat, now: Date = .now) async throws -> String {
         guard let segmentID else { throw ProviderError.notConfigured("no active segment") }
         let json = encodeContent(content)
         let id = UUID().uuidString
@@ -158,7 +158,8 @@ actor SessionManager {
                 role: MessageRecord.Role(rawValue: role.rawValue) ?? .assistant,
                 status: status, contentJson: json,
                 runId: runId, model: model, provider: provider,
-                inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, createdAt: now
+                inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, createdAt: now,
+                kind: kind
             )
             try record.insert(db)
         }
@@ -209,12 +210,14 @@ actor SessionManager {
         let content: [ContentBlock]
         let status: MessageRecord.Status
         let createdAt: Date
+        let kind: String
     }
 
     func messages(inSegment id: String) async -> [StoredMessage] {
         (try? await database.reader.read { db -> [StoredMessage] in
             let records = try MessageRecord
                 .filter(Column("segment_id") == id)
+                .filter(Column("active") == true)
                 .order(Column("seq"))
                 .fetchAll(db)
             return records.map(Self.stored)
@@ -227,6 +230,7 @@ actor SessionManager {
         (try? await database.reader.read { db -> [StoredMessage] in
             let records = try MessageRecord
                 .filter(Column("created_at") < cutoff)
+                .filter(Column("active") == true)
                 .order(Column("created_at").desc)
                 .limit(limit)
                 .fetchAll(db)
@@ -240,7 +244,8 @@ actor SessionManager {
             role: MessageRole(rawValue: r.role) ?? .assistant,
             content: decodeContent(r.contentJson),
             status: MessageRecord.Status(rawValue: r.status) ?? .complete,
-            createdAt: r.createdAt
+            createdAt: r.createdAt,
+            kind: r.kind
         )
     }
 

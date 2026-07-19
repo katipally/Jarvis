@@ -7,13 +7,14 @@ import JStore
 struct RunStore: Sendable {
     let database: JarvisDatabase
 
-    func createRun(id: String, kind: String, segmentID: String?, initiator: String?) async {
+    func createRun(id: String, kind: String, segmentID: String?, initiator: String?, label: String? = nil) async {
         _ = try? await database.writer.write { db in
-            try RunRow(id: id, kind: kind, segmentId: segmentID, initiator: initiator, status: "running").insert(db)
+            try RunRow(id: id, kind: kind, segmentId: segmentID, initiator: initiator,
+                       status: "running", label: label).insert(db)
         }
     }
 
-    func finishRun(id: String, status: String, usage: Usage, error: String?) async {
+    func finishRun(id: String, status: String, usage: Usage, error: String?, costUSD: Double? = nil) async {
         _ = try? await database.writer.write { db in
             guard var row = try RunRow.fetchOne(db, key: id) else { return }
             row.status = status
@@ -21,6 +22,8 @@ struct RunStore: Sendable {
             row.error = error
             row.totalInputTokens = usage.inputTokens
             row.totalOutputTokens = usage.outputTokens
+            row.totalCacheReadTokens = usage.cacheReadTokens
+            row.costUsd = costUSD
             try row.update(db)
         }
     }
@@ -31,11 +34,13 @@ struct RunStore: Sendable {
         }
     }
 
-    func toolFinished(id: String, state: String, preview: String) async {
+    func toolFinished(id: String, state: String, preview: String, artifactID: String? = nil) async {
         _ = try? await database.writer.write { db in
             guard var row = try ToolCallRow.fetchOne(db, key: id) else { return }
             row.state = state
             row.outputPreview = String(preview.prefix(400))
+            row.outputArtifactId = artifactID
+            row.durationMs = Int(Date.now.timeIntervalSince(row.createdAt) * 1000)
             try row.update(db)
         }
     }
@@ -47,6 +52,11 @@ struct RunStore: Sendable {
         let kind: String
         let status: String
         let startedAt: Date
+        let endedAt: Date?
+        let label: String?
+        let totalInputTokens: Int
+        let totalOutputTokens: Int
+        let costUsd: Double?
         let toolCalls: [ToolCallRow]
     }
 
@@ -58,7 +68,10 @@ struct RunStore: Sendable {
                     .filter(Column("run_id") == run.id)
                     .order(Column("created_at"))
                     .fetchAll(db)
-                return RunSummary(id: run.id, kind: run.kind, status: run.status, startedAt: run.startedAt, toolCalls: calls)
+                return RunSummary(id: run.id, kind: run.kind, status: run.status,
+                                  startedAt: run.startedAt, endedAt: run.endedAt, label: run.label,
+                                  totalInputTokens: run.totalInputTokens, totalOutputTokens: run.totalOutputTokens,
+                                  costUsd: run.costUsd, toolCalls: calls)
             }
         }) ?? []
     }

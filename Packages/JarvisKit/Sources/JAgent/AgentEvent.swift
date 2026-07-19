@@ -7,7 +7,7 @@ public enum AgentEvent: Sendable {
     case textDelta(String)
     case thinkingDelta(String)
     case toolCallStarted(id: String, name: String, input: JSONValue)
-    case toolCallFinished(id: String, output: String, isError: Bool)
+    case toolCallFinished(id: String, output: String, isError: Bool, artifactID: String? = nil)
     case assistantMessage(NeutralMessage)
     case usage(Usage)
     case completed(StopReason)

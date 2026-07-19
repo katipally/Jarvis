@@ -20,14 +20,47 @@ struct DisplayMessage: Identifiable, Equatable {
 }
 
 extension DisplayMessage {
-    /// A persisted row restored into the transcript (scroll-up history).
-    init(stored: SessionManager.StoredMessage) {
-        self.init(
-            id: stored.id,
-            role: stored.role == .user ? .user : .assistant,
-            text: stored.content.compactMap { if case .text(let t) = $0 { t } else { nil } }.joined(),
-            images: stored.content.compactMap { if case .image(let i) = $0 { i } else { nil } }
-        )
+    /// Persisted rows → display rows. Tool activity is reconstructed by pairing
+    /// toolUse blocks with the toolResult blocks that live in later user rows;
+    /// bare tool-result rows and compaction summaries are not shown directly.
+    static func rows(from stored: [SessionManager.StoredMessage]) -> [DisplayMessage] {
+        var results: [String: (output: String, isError: Bool)] = [:]
+        for message in stored {
+            for case .toolResult(let id, let content, let isError, _) in message.content {
+                results[id] = (content, isError)
+            }
+        }
+
+        var rows: [DisplayMessage] = []
+        for message in stored {
+            if message.kind == MessageRecord.Kind.summary.rawValue { continue }
+            let text = message.content.compactMap { if case .text(let t) = $0 { t } else { nil } }.joined()
+            let images = message.content.compactMap { if case .image(let i) = $0 { i } else { nil } }
+            let toolUses = message.content.compactMap { block -> (id: String, name: String)? in
+                if case .toolUse(let id, let name, _) = block { return (id, name) }
+                return nil
+            }
+            switch message.role {
+            case .user:
+                let onlyToolResults = text.isEmpty && images.isEmpty && !message.content.isEmpty
+                if onlyToolResults { continue } // shown via the paired tool rows
+                rows.append(DisplayMessage(id: message.id, role: .user, text: text, images: images))
+            default:
+                if !text.isEmpty {
+                    rows.append(DisplayMessage(id: message.id, role: .assistant, text: text, images: images))
+                }
+                for use in toolUses {
+                    let result = results[use.id]
+                    rows.append(DisplayMessage(
+                        id: use.id, role: .tool, text: result?.output ?? "",
+                        isError: result?.isError ?? false,
+                        toolName: use.name,
+                        toolState: (result?.isError ?? false) ? .error : .done
+                    ))
+                }
+            }
+        }
+        return rows
     }
 }
 
@@ -79,12 +112,6 @@ final class ChatStore {
     private(set) var hasOlderHistory = true
     private var historyCursor = Date.now // everything before launch is "older"
     private var historyLoadInFlight = false
-
-    /// Rough transcript cap (~chars ≈ tokens × 4). Oldest turns are dropped
-    /// beyond it so a long segment can't overflow the model's context.
-    // ponytail: char-count sliding window; aux-model summarization if recall of
-    // dropped turns ever matters.
-    private static let transcriptCharBudget = 300_000
 
     /// The system prompt is deliberately static — every dynamic fact (time,
     /// frontmost app, memory) rides in the user turn so the provider prompt
@@ -217,8 +244,8 @@ final class ChatStore {
             )
             guard let self else { return }
             self.transcript.append(userMessage)
-            self.trimTranscriptIfNeeded()
             _ = try? await sessions.append(role: .user, content: [.text(userText)] + images.map(ContentBlock.image), status: .complete)
+            await self.compactIfNeeded(accountID: resolved.account.id, model: model)
 
             let loop = AgentLoop(
                 adapter: adapter, tools: tools, gate: gate,
@@ -237,26 +264,27 @@ final class ChatStore {
                 case .thinkingDelta(let t):
                     self.appendToAssistant(t, thinking: true)
                 case .assistantMessage(let m):
-                    self.flushPendingToolResults()
+                    await self.flushPendingToolResults(runID: runID)
                     self.finalizeAssistant(m)
                     self.transcript.append(m)
-                    if !m.plainText.isEmpty {
+                    // Persist every assistant turn — including tool-only turns —
+                    // so History and relaunch see the full run, not just prose.
+                    if !m.content.isEmpty {
                         _ = try? await sessions.append(role: .assistant, content: m.content, status: .complete,
                                                        runId: runID, model: model, provider: providerLabel)
                     }
                 case .toolCallStarted(let id, let name, let input):
                     self.messages.append(DisplayMessage(id: id, role: .tool, toolName: name, toolState: .running))
                     await runStore.toolStarted(id: id, runID: runID, name: name, input: input)
-                case .toolCallFinished(let id, let output, let isError):
+                case .toolCallFinished(let id, let output, let isError, let artifactID):
                     self.updateToolRow(id: id, output: output, isError: isError)
                     self.pendingToolResults.append(.toolResult(toolUseId: id, content: output, isError: isError, images: []))
-                    await runStore.toolFinished(id: id, state: isError ? "error" : "done", preview: output)
+                    await runStore.toolFinished(id: id, state: isError ? "error" : "done", preview: output, artifactID: artifactID)
                 case .usage(let u):
-                    usage.inputTokens += u.inputTokens
-                    usage.outputTokens += u.outputTokens
+                    usage.add(u)
                 case .completed(let reason):
                     completion = reason
-                    self.flushPendingToolResults()
+                    await self.flushPendingToolResults(runID: runID)
                 case .aborted:
                     break // handled below — cancellation usually ends iteration before this arrives
                 case .failed(let message):
@@ -267,26 +295,29 @@ final class ChatStore {
             // Cancellation ends stream iteration before `.aborted` can be
             // delivered, so abort handling must live HERE, not in the loop.
             if Task.isCancelled {
-                self.repairDanglingTools()
+                self.repairDanglingTools(runID: runID)
                 self.markActiveAborted()
             }
             if completion == .refusal {
                 self.showFailure("The model declined to answer this request.")
             }
 
-            self.finishRun(runID: runID, usage: usage, interrupted: Task.isCancelled)
+            self.finishRun(runID: runID, usage: usage, interrupted: Task.isCancelled,
+                           accountID: resolved.account.id, model: model)
         }
     }
 
     /// End-of-run persistence runs in an unstructured task: GRDB honors task
     /// cancellation, so doing these writes inside the cancelled run task would
     /// silently drop them (runs stuck "running" forever).
-    private func finishRun(runID: String, usage: Usage, interrupted: Bool) {
+    private func finishRun(runID: String, usage: Usage, interrupted: Bool, accountID: String, model: String) {
         let runStore = agent.runStore
+        let core = self.core
         let status = interrupted ? "cancelled" : (errorText == nil ? "done" : "error")
         let errorText = self.errorText
         Task { @MainActor [weak self] in
-            await runStore.finishRun(id: runID, status: status, usage: usage, error: errorText)
+            let cost = await core.capability(forAccount: accountID, model: model)?.cost(of: usage)
+            await runStore.finishRun(id: runID, status: status, usage: usage, error: errorText, costUSD: cost)
             guard let self else { return }
             self.phase = .idle
             self.deliverQueuedProactive()
@@ -327,41 +358,41 @@ final class ChatStore {
         return lines.joined(separator: "\n")
     }
 
-    /// Drop oldest turns beyond the char budget, keeping tool_use/tool_result
-    /// pairs intact by always cutting at a user-text boundary.
-    private func trimTranscriptIfNeeded() {
-        var total = transcript.reduce(0) { $0 + $1.content.reduce(0) { $0 + blockSize($1) } }
-        guard total > Self.transcriptCharBudget else { return }
-        var dropCount = 0
-        for message in transcript {
-            let size = message.content.reduce(0) { $0 + blockSize($1) }
-            if total <= Self.transcriptCharBudget { break }
-            total -= size
-            dropCount += 1
-        }
-        // Never split an assistant tool_use from its results: advance to the
-        // next plain user turn.
-        while dropCount < transcript.count, !isPlainUserTurn(transcript[dropCount]) {
-            dropCount += 1
-        }
-        transcript.removeFirst(min(dropCount, max(0, transcript.count - 2)))
+    /// Pre-call compaction (hermes pattern): when the transcript nears the
+    /// model's context limit, the middle is folded into one summary message —
+    /// persisted as a kind='summary' row so restore sees the same view.
+    private func compactIfNeeded(accountID: String, model: String) async {
+        let limit = await core.capability(forAccount: accountID, model: model)?.contextLimit ?? 200_000
+        guard let plan = TranscriptCompactor.plan(transcript, contextLimit: limit, toolSchemas: agent.tools.schemas)
+        else { return }
+
+        // ponytail: aux/brain summarizes; Phase 3 puts the local model first.
+        let summary = await summarize(plan.middle)
+            ?? "Earlier conversation: \(plan.middle.count) turns omitted to fit the context window."
+        let summaryText = "[Conversation summary]\n\(summary)"
+        transcript = plan.head + [.user(summaryText)] + plan.tail
+        _ = try? await sessions.append(role: .user, content: [.text(summaryText)], status: .complete, kind: .summary)
     }
 
-    private func blockSize(_ block: ContentBlock) -> Int {
-        switch block {
-        case .text(let t): t.count
-        case .thinking(let t, _): t.count
-        case .image: 6000 // rough token-equivalent of one attached image
-        case .toolUse(_, _, let input): input.jsonString.count
-        case .toolResult(_, let content, _, let images): content.count + images.count * 6000
+    private func summarize(_ middle: [NeutralMessage]) async -> String? {
+        guard let resolved = core.resolve(.aux) ?? core.resolve(.brain) else { return nil }
+        let request = ModelRequest(
+            model: resolved.model,
+            system: """
+            Summarize this conversation history compactly for the assistant's own memory. \
+            Keep: the user's goals, decisions made, facts learned, tool findings, and \
+            unresolved threads. Omit pleasantries. Plain prose, no preamble.
+            """,
+            messages: [.user(TranscriptCompactor.renderForSummary(middle))],
+            maxTokens: 500
+        )
+        let engine = ChatEngine(adapter: resolved.adapter)
+        var text = ""
+        for await event in engine.run(request) {
+            if case .assistantMessage(let m) = event { text = m.plainText }
         }
-    }
-
-    private func isPlainUserTurn(_ message: NeutralMessage) -> Bool {
-        message.role == .user && !message.content.contains {
-            if case .toolResult = $0 { return true }
-            return false
-        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     func addAttachment(_ attachment: Attachment) { attachments.append(attachment) }
@@ -416,7 +447,7 @@ final class ChatStore {
                 return
             }
             self.historyCursor = older.first?.createdAt ?? cutoff
-            let rows = older.map(DisplayMessage.init(stored:))
+            let rows = DisplayMessage.rows(from: older)
             self.messages.insert(contentsOf: rows, at: 0)
             if older.count < 30 { self.hasOlderHistory = false }
         }
@@ -450,15 +481,21 @@ final class ChatStore {
         mutate(id) { $0.toolState = isError ? .error : .done; $0.text = output }
     }
 
-    private func flushPendingToolResults() {
+    /// Appends buffered tool results to the transcript AND persists them, so
+    /// tool turns survive relaunch. Awaited inline to keep message seq ordered.
+    private func flushPendingToolResults(runID: String) async {
         guard !pendingToolResults.isEmpty else { return }
-        transcript.append(NeutralMessage(role: .user, content: pendingToolResults))
+        let blocks = pendingToolResults
         pendingToolResults = []
+        transcript.append(NeutralMessage(role: .user, content: blocks))
+        _ = try? await sessions.append(role: .user, content: blocks, status: .complete, runId: runID)
     }
 
     /// After an abort, synthesize results for any tool_use left without one so
-    /// the next model call sees a valid transcript.
-    private func repairDanglingTools() {
+    /// the next model call sees a valid transcript. Persistence goes through an
+    /// unstructured task — GRDB honors cancellation and this path only runs on
+    /// a cancelled task.
+    private func repairDanglingTools(runID: String) {
         if let last = transcript.last, last.role == .assistant {
             let toolIDs = last.content.compactMap { block -> String? in
                 if case .toolUse(let id, _, _) = block { return id }
@@ -472,7 +509,14 @@ final class ChatStore {
                 pendingToolResults.append(.toolResult(toolUseId: id, content: "Cancelled by the user.", isError: true, images: []))
             }
         }
-        flushPendingToolResults()
+        guard !pendingToolResults.isEmpty else { return }
+        let blocks = pendingToolResults
+        pendingToolResults = []
+        transcript.append(NeutralMessage(role: .user, content: blocks))
+        let sessions = self.sessions
+        Task {
+            _ = try? await sessions.append(role: .user, content: blocks, status: .complete, runId: runID)
+        }
     }
 
     private func markActiveAborted() {
@@ -519,7 +563,7 @@ enum ChatDebugLog {
         case .thinkingDelta(let t): line = "thinkingDelta(\(t.count)ch)"
         case .assistantMessage(let m): line = "assistantMessage(plainText=\(m.plainText.count)ch, blocks=\(m.content.count))"
         case .toolCallStarted(_, let name, _): line = "toolCallStarted(\(name))"
-        case .toolCallFinished(let id, _, let isError): line = "toolCallFinished(\(id), error=\(isError))"
+        case .toolCallFinished(let id, _, let isError, _): line = "toolCallFinished(\(id), error=\(isError))"
         case .usage(let u): line = "usage(in=\(u.inputTokens), out=\(u.outputTokens))"
         case .completed(let r): line = "completed(\(r))"
         case .aborted: line = "aborted"
