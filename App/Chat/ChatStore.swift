@@ -19,6 +19,18 @@ struct DisplayMessage: Identifiable, Equatable {
     var toolState: ToolState? = nil
 }
 
+extension DisplayMessage {
+    /// A persisted row restored into the transcript (scroll-up history).
+    init(stored: SessionManager.StoredMessage) {
+        self.init(
+            id: stored.id,
+            role: stored.role == .user ? .user : .assistant,
+            text: stored.content.compactMap { if case .text(let t) = $0 { t } else { nil } }.joined(),
+            images: stored.content.compactMap { if case .image(let i) = $0 { i } else { nil } }
+        )
+    }
+}
+
 /// A file/image dropped onto the chat, pending send.
 struct Attachment: Identifiable, Equatable {
     let id = UUID().uuidString
@@ -62,6 +74,12 @@ final class ChatStore {
     private var lastUserText: String?
     private var queuedProactive: [String] = []
 
+    // Scroll-up lazy history (iMessage style): persisted turns older than this
+    // session's in-memory rows load in pages as the user reaches the top.
+    private(set) var hasOlderHistory = true
+    private var historyCursor = Date.now // everything before launch is "older"
+    private var historyLoadInFlight = false
+
     /// Rough transcript cap (~chars ≈ tokens × 4). Oldest turns are dropped
     /// beyond it so a long segment can't overflow the model's context.
     // ponytail: char-count sliding window; aux-model summarization if recall of
@@ -100,6 +118,10 @@ final class ChatStore {
         self.core = core
         self.sessions = sessions
         self.agent = agent
+        // Restore the tail of the conversation right away (iMessage-style):
+        // relaunching shows where you left off; the greeting appears only when
+        // there is no history at all. Scroll-up pages further back.
+        loadOlderHistory()
     }
 
     var canSend: Bool {
@@ -347,6 +369,28 @@ final class ChatStore {
     }
 
     func markProactiveRead() { hasUnreadProactive = false }
+
+    /// Prepends one page of persisted conversation (all sessions, newest first)
+    /// when the user scrolls to the top of the transcript.
+    func loadOlderHistory() {
+        guard hasOlderHistory, !historyLoadInFlight else { return }
+        historyLoadInFlight = true
+        let cutoff = historyCursor
+        let sessions = self.sessions
+        Task { @MainActor [weak self] in
+            let older = await sessions.messagesBefore(cutoff)
+            guard let self else { return }
+            self.historyLoadInFlight = false
+            guard !older.isEmpty else {
+                self.hasOlderHistory = false
+                return
+            }
+            self.historyCursor = older.first?.createdAt ?? cutoff
+            let rows = older.map(DisplayMessage.init(stored:))
+            self.messages.insert(contentsOf: rows, at: 0)
+            if older.count < 30 { self.hasOlderHistory = false }
+        }
+    }
 
     var latestAssistant: DisplayMessage? {
         messages.last { $0.role == .assistant }

@@ -43,6 +43,12 @@ extension MarkdownUI.Theme {
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .markdownMargin(top: 6, bottom: 6)
             }
+            .paragraph { config in
+                config.label
+                    .fixedSize(horizontal: false, vertical: true)
+                    .relativeLineSpacing(.em(0.28))
+                    .markdownMargin(top: 0, bottom: 10)
+            }
             .listItem { config in
                 config.label.markdownMargin(top: 2, bottom: 2)
             }

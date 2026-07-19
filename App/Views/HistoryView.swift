@@ -1,111 +1,175 @@
 import JAgent
-import MarkdownUI
 import SwiftUI
 
+/// Full chat history: every past conversation (session segment) is one chat.
+/// The list shows conversation cards; opening one renders the whole exchange
+/// with the same visuals as the live transcript.
 struct HistoryView: View {
     let sessions: SessionManager
     @State private var segments: [SessionManager.SegmentSummary] = []
-    @State private var expanded: String?
-    /// Messages keyed by segment id, so expanding one segment can never show
-    /// another segment's rows while its own are still loading.
-    @State private var messagesBySegment: [String: [SessionManager.StoredMessage]] = [:]
+    @State private var selected: SessionManager.SegmentSummary?
+    @State private var detailMessages: [SessionManager.StoredMessage]?
 
     var body: some View {
-        Group {
-            if segments.isEmpty {
-                VStack(spacing: 12) {
-                    Spacer()
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(.white.opacity(0.55))
-                    Text("No conversations yet")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.55))
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+        ZStack {
+            if let selected {
+                conversationDetail(selected)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .trailing).combined(with: .opacity)
+                    ))
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(segments) { segment in
-                            SegmentRow(
-                                segment: segment,
-                                isOpen: expanded == segment.id,
-                                messages: messagesBySegment[segment.id],
-                                toggle: { toggle(segment) }
-                            )
-                        }
-                    }
-                    .padding(.vertical, 12)
-                }
+                conversationList
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
             }
         }
+        .animation(.snappy(duration: 0.3), value: selected?.id)
         .task { segments = await sessions.recentSegments() }
     }
 
-    private func toggle(_ segment: SessionManager.SegmentSummary) {
-        if expanded == segment.id {
-            withAnimation(.snappy(duration: 0.3)) { expanded = nil }
+    // MARK: - List
+
+    @ViewBuilder
+    private var conversationList: some View {
+        if segments.isEmpty {
+            VStack(spacing: 12) {
+                Spacer()
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 22, weight: .light))
+                    .foregroundStyle(.white.opacity(0.55))
+                Text("No conversations yet")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.55))
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
         } else {
-            withAnimation(.snappy(duration: 0.3)) { expanded = segment.id }
-            if messagesBySegment[segment.id] == nil {
-                Task {
-                    let loaded = await sessions.messages(inSegment: segment.id)
-                    withAnimation(.snappy(duration: 0.3)) { messagesBySegment[segment.id] = loaded }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(segments) { segment in
+                        ConversationCard(segment: segment) { open(segment) }
+                    }
                 }
+                .padding(.vertical, 12)
+            }
+            .scrollIndicators(.hidden)
+            .mask {
+                VStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .black.opacity(0.1)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 14)
+                }
+            }
+        }
+    }
+
+    private func open(_ segment: SessionManager.SegmentSummary) {
+        detailMessages = nil
+        selected = segment
+        Task {
+            let loaded = await sessions.messages(inSegment: segment.id)
+            withAnimation(.snappy(duration: 0.25)) { detailMessages = loaded }
+        }
+    }
+
+    // MARK: - Detail (one conversation = one chat)
+
+    private func conversationDetail(_ segment: SessionManager.SegmentSummary) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button {
+                    selected = nil
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(.white.opacity(0.08)))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .pointerStyle(.link)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel("Back to conversations")
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(segment.title ?? (segment.preview.isEmpty ? "Conversation" : segment.preview))
+                        .font(.jarvisBody.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                    Text(segment.startedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.jarvisFootnote)
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                Spacer()
+            }
+            .padding(.bottom, 10)
+
+            if let detailMessages {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(detailMessages) { stored in
+                            MessageRow(message: DisplayMessage(stored: stored))
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                .scrollIndicators(.hidden)
+                .mask {
+                    VStack(spacing: 0) {
+                        LinearGradient(colors: [.black.opacity(0.05), .black], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 12)
+                        Rectangle()
+                        LinearGradient(colors: [.black, .black.opacity(0.1)], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 12)
+                    }
+                }
+            } else {
+                Spacer()
+                ProgressView().controlSize(.small)
+                Spacer()
             }
         }
     }
 }
 
-private struct SegmentRow: View {
+private struct ConversationCard: View {
     let segment: SessionManager.SegmentSummary
-    let isOpen: Bool
-    let messages: [SessionManager.StoredMessage]?
-    let toggle: () -> Void
+    let open: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Button(action: toggle) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(segment.title ?? (segment.preview.isEmpty ? "Conversation" : segment.preview))
-                            .font(.jarvisBody.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .lineLimit(1)
+        Button(action: open) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(segment.title ?? (segment.preview.isEmpty ? "Conversation" : segment.preview))
+                        .font(.jarvisBody.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                    HStack(spacing: 6) {
                         Text(segment.startedAt.formatted(date: .abbreviated, time: .shortened))
-                            .font(.jarvisFootnote)
-                            .monospacedDigit()
-                            .foregroundStyle(.white.opacity(0.55))
+                        Text("·")
+                        Text("\(segment.messageCount) messages")
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.jarvisFootnote)
-                        .foregroundStyle(.white.opacity(0.55))
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .font(.jarvisFootnote)
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.55))
                 }
-                .contentShape(Rectangle())
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.45))
             }
-            .buttonStyle(.plain)
-            .pointerStyle(.link)
-
-            if isOpen {
-                if let messages {
-                    ForEach(messages) { message in
-                        historyMessage(message)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity)
-                        .transition(.opacity)
-                }
-            }
+            .padding(14)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(16)
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.white.opacity(isHovering ? 0.09 : 0.05))
@@ -113,24 +177,5 @@ private struct SegmentRow: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) { isHovering = hovering }
         }
-    }
-
-    @ViewBuilder
-    private func historyMessage(_ message: SessionManager.StoredMessage) -> some View {
-        let text = message.content.compactMap { if case .text(let t) = $0 { return t } else { return nil } }.joined()
-        HStack(alignment: .top, spacing: 12) {
-            Text(message.role == .user ? "You" : "Jarvis")
-                .font(.jarvisFootnote.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.55))
-                .frame(width: 42, alignment: .leading)
-            if message.role == .user {
-                Text(text)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.8))
-            } else {
-                Markdown(text).markdownTheme(.jarvis).textSelection(.enabled)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

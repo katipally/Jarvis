@@ -12,6 +12,7 @@ final class NotchScreenManager {
 
     private var panels: [CGDirectDisplayID: Panel] = [:]
     private var screenObserver: NSObjectProtocol?
+    private var appActivationObserver: NSObjectProtocol?
     private var rebuildTask: Task<Void, Never>?
     private var mouseMonitors: [Any] = []
     private var core: JarvisCore?
@@ -31,6 +32,17 @@ final class NotchScreenManager {
         }
     }
 
+    /// System agents that present permission/auth dialogs. While one of these is
+    /// frontmost, panels drop below dialog level so the prompt is never hidden
+    /// behind the notch.
+    private static let systemDialogAgents: Set<String> = [
+        "com.apple.UserNotificationCenter",   // TCC permission alerts
+        "com.apple.SecurityAgent",            // keychain / authorization
+        "com.apple.coreservices.uiagent",     // gatekeeper & consent prompts
+        "com.apple.CoreLocationAgent",
+        "com.apple.accessibility.universalAccessAuthWarn",
+    ]
+
     func start(core: JarvisCore, chat: ChatStore, voice: VoiceController) {
         self.core = core
         self.chat = chat
@@ -43,6 +55,22 @@ final class NotchScreenManager {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.scheduleRebuild() }
+        }
+
+        appActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let bundleID = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?
+                .bundleIdentifier
+            let yields = bundleID.map(Self.systemDialogAgents.contains) ?? false
+            Task { @MainActor in
+                guard let self else { return }
+                for (_, panel) in self.panels {
+                    panel.window.setYieldsToSystemDialog(yields)
+                }
+            }
         }
 
         // SwiftUI onHover can miss exit events during animated resizes, so the
@@ -67,6 +95,9 @@ final class NotchScreenManager {
         rebuildTask?.cancel()
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
+        }
+        if let appActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(appActivationObserver)
         }
         for monitor in mouseMonitors {
             NSEvent.removeMonitor(monitor)

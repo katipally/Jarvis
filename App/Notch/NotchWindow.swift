@@ -21,13 +21,22 @@ final class NotchWindow: NSPanel {
         hidesOnDeactivate = false
         // Take keyboard only when a text field is clicked — not on hover/buttons.
         becomesKeyOnlyIfNeeded = true
-        level = .mainMenu + 3
+        level = Self.normalLevel
         collectionBehavior = [
             .fullScreenAuxiliary,
             .stationary,
             .canJoinAllSpaces,
             .ignoresCycle,
         ]
+    }
+
+    /// Above the menu bar — the notch must cover the menu-bar strip.
+    static let normalLevel: NSWindow.Level = .mainMenu + 3
+
+    /// While a system permission/auth dialog is up, drop below it so the user
+    /// can actually see and answer it (the notch would otherwise cover it).
+    func setYieldsToSystemDialog(_ yields: Bool) {
+        level = yields ? .floating : Self.normalLevel
     }
 
     // Must become key so text fields (composer, API key entry) accept input.

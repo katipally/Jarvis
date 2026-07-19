@@ -40,36 +40,45 @@ struct HomeView: View {
         .animation(.snappy, value: isDropTargeted)
     }
 
-    @ViewBuilder
+    /// Answer-focused transcript: opens pinned to the latest reply; scrolling up
+    /// pages older persisted conversation in (iMessage style). The empty state
+    /// is a personal greeting, LocalNotch-style.
     private var transcript: some View {
-        if visibleMessages.isEmpty {
-            VStack(spacing: 10) {
-                Spacer()
-                Image(systemName: "sparkles")
-                    .font(.system(size: 20, weight: .light))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .symbolEffect(.breathe)
-                    .accessibilityHidden(true)
-                Text("Ask Jarvis anything")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.55))
-                Text("or drop a file to attach")
-                    .font(.jarvisCaption)
-                    .foregroundStyle(.white.opacity(0.45))
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
-        } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                if chat.hasOlderHistory {
+                    HStack {
+                        Spacer()
+                        ProgressView().controlSize(.mini)
+                        Spacer()
+                    }
+                    .padding(.vertical, 6)
+                    .onAppear { chat.loadOlderHistory() }
+                }
+                if visibleMessages.isEmpty {
+                    GreetingView()
+                        .containerRelativeFrame(.vertical) { height, _ in height * 0.96 }
+                        .frame(maxWidth: .infinity)
+                } else {
                     ForEach(visibleMessages) { message in
                         MessageRow(message: message)
                     }
                 }
-                .padding(.top, 4)
-                .padding(.bottom, 10)
             }
-            .defaultScrollAnchor(.bottom)
+            .padding(.top, 4)
+            .padding(.bottom, 10)
+        }
+        .defaultScrollAnchor(.bottom)
+        .scrollIndicators(.hidden)
+        .mask {
+            // Content dissolves at the edges instead of clipping hard.
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.black.opacity(0.05), .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 18)
+                Rectangle()
+                LinearGradient(colors: [.black, .black.opacity(0.1)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 12)
+            }
         }
     }
 
@@ -200,7 +209,43 @@ struct HomeView: View {
     }
 }
 
-private struct MessageRow: View {
+/// LocalNotch-style idle state: a personal greeting with the live date/time.
+private struct GreetingView: View {
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: .now)
+        let salute = switch hour {
+        case 0..<5: "Good night"
+        case 5..<12: "Good morning"
+        case 12..<17: "Good afternoon"
+        default: "Good evening"
+        }
+        let name = NSFullUserName().components(separatedBy: " ").first ?? ""
+        return name.isEmpty ? "\(salute)." : "\(salute), \(name)."
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Text(greeting)
+                .font(.system(size: 26, weight: .medium))
+                .foregroundStyle(.white)
+            TimelineView(.everyMinute) { context in
+                Text(context.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))
+                    .font(.system(size: 12))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            Text("Ask anything, or drop a file to attach")
+                .font(.jarvisCaption)
+                .foregroundStyle(.white.opacity(0.45))
+                .padding(.top, 2)
+            Spacer()
+        }
+        .multilineTextAlignment(.center)
+    }
+}
+
+struct MessageRow: View {
     let message: DisplayMessage
 
     var body: some View {
