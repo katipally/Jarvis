@@ -1,0 +1,53 @@
+name: Jarvis
+
+options:
+  bundleIdPrefix: com.jarvis
+  deploymentTarget:
+    macOS: "26.0"
+
+packages:
+  JarvisKit:
+    path: Packages/JarvisKit
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    from: "2.4.0"
+
+targets:
+  Jarvis:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: App
+    dependencies:
+      - package: JarvisKit
+        products:
+          - JStore
+          - JAgent
+          - JSpeech
+          - JMemory
+          - JControl
+          - JScreen
+          - JProactive
+      - package: MarkdownUI
+        products:
+          - MarkdownUI
+    settings:
+      base:
+        PRODUCT_NAME: Jarvis
+        PRODUCT_BUNDLE_IDENTIFIER: com.jarvis.app
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        INFOPLIST_KEY_NSPrincipalClass: NSApplication
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Jarvis uses the microphone for voice input when you hold Option to talk."
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Jarvis transcribes your voice on-device to understand what you say."
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: "Jarvis reads and adds calendar events when you ask it to."
+        INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: "Jarvis reads and adds reminders when you ask it to."
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: "Jarvis controls apps like Mail and Notes on your behalf when you ask it to."
+        SWIFT_VERSION: "6.0"
+        ENABLE_APP_INTENTS_METADATA_GENERATION: NO
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: App/Jarvis.entitlements
+        INFOPLIST_KEY_CFBundleShortVersionString: "0.1"
