@@ -1,11 +1,12 @@
 import Foundation
 
 /// Task categories that can each be routed to a different provider/model.
-/// The harness is neutral: no role has a default model.
+/// The harness is neutral: no role has a default model. Extraction, summaries,
+/// and embeddings run on the on-device model first (see JLocal); the aux API
+/// role is an optional quality upgrade, not a requirement.
 public enum AgentRole: String, Sendable, Codable, CaseIterable, Identifiable {
     case brain      // chat + tools
-    case aux        // extraction, nudge decisions, compaction, summaries
-    case embeddings // semantic memory (may be Apple on-device instead)
+    case aux        // optional quality upgrade for extraction/summaries/nudges
 
     public var id: String { rawValue }
 
@@ -13,15 +14,13 @@ public enum AgentRole: String, Sendable, Codable, CaseIterable, Identifiable {
         switch self {
         case .brain: "Brain"
         case .aux: "Auxiliary"
-        case .embeddings: "Embeddings"
         }
     }
 
     public var detail: String {
         switch self {
         case .brain: "Chat and tool use"
-        case .aux: "Extraction, summaries, proactivity checks"
-        case .embeddings: "Semantic memory search"
+        case .aux: "Optional — upgrades on-device extraction, summaries, nudges"
         }
     }
 }

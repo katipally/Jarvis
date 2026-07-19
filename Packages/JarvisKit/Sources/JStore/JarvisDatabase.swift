@@ -295,6 +295,84 @@ public final class JarvisDatabase: Sendable {
             try db.create(index: "message_on_run", on: "message", columns: ["run_id"])
         }
 
+        // Debounced memory extraction (Hive pattern): pending = user rows with
+        // no extracted_at. The partial index is the resume cursor at boot.
+        migrator.registerMigration("v8_memory_extraction") { db in
+            try db.alter(table: "message") { t in
+                t.add(column: "extracted_at", .datetime)
+            }
+            try db.execute(sql: """
+                CREATE INDEX message_pending_extraction ON message(created_at)
+                WHERE extracted_at IS NULL AND role = 'user'
+                """)
+        }
+
+        // Screen Rewind: OCR text on each frame + an FTS5 twin for search.
+        migrator.registerMigration("v9_screen_ocr") { db in
+            try db.alter(table: "screen_frame") { t in
+                t.add(column: "ocr_text", .text)
+                t.add(column: "ocr_status", .text).notNull().defaults(to: "pending") // pending | done | skipped
+            }
+            // Same GRDB synchronize mechanism as memory_fts (v3): triggers keep
+            // the index in step through inserts, OCR updates, and TTL deletes.
+            try db.create(virtualTable: "screen_frame_fts", using: FTS5()) { t in
+                t.synchronize(withTable: "screen_frame")
+                t.column("ocr_text")
+                t.column("window_title")
+                t.tokenizer = .porter(wrapping: .unicode61())
+            }
+        }
+
+        // Commitments ("you said you'd send X by 3pm") + staged tasks/action items.
+        migrator.registerMigration("v10_proactivity_tasks") { db in
+            try db.create(table: "commitment") { t in
+                t.primaryKey("id", .text)
+                t.column("text", .text).notNull()
+                t.column("due_at", .datetime)
+                t.column("dedupe_key", .text)
+                t.column("source_segment_id", .text)
+                t.column("status", .text).notNull().defaults(to: "open") // open | notified | done | dismissed
+                t.column("created_at", .datetime).notNull()
+            }
+            try db.create(index: "commitment_on_due", on: "commitment", columns: ["status", "due_at"])
+
+            try db.create(table: "task") { t in
+                t.primaryKey("id", .text)
+                t.column("text", .text).notNull()
+                t.column("source", .text).notNull()       // chat | meeting | manual
+                t.column("source_id", .text)
+                t.column("status", .text).notNull().defaults(to: "suggested") // suggested | open | done | dismissed
+                t.column("due_at", .datetime)
+                t.column("created_at", .datetime).notNull()
+            }
+            try db.create(index: "task_on_status", on: "task", columns: ["status", "created_at"])
+        }
+
+        // Meeting transcription (opt-in): one meeting → many attributed segments.
+        migrator.registerMigration("v11_meetings") { db in
+            try db.create(table: "meeting") { t in
+                t.primaryKey("id", .text)
+                t.column("started_at", .datetime).notNull()
+                t.column("ended_at", .datetime)
+                t.column("app_bundle_id", .text)
+                t.column("title", .text)
+                t.column("overview", .text)
+                t.column("summary_status", .text).notNull().defaults(to: "pending") // pending | done | skipped
+                t.column("created_at", .datetime).notNull()
+            }
+            try db.create(index: "meeting_on_started", on: "meeting", columns: ["started_at"])
+
+            try db.create(table: "meeting_segment") { t in
+                t.primaryKey("id", .text)
+                t.column("meeting_id", .text).notNull()
+                    .references("meeting", onDelete: .cascade)
+                t.column("ts", .datetime).notNull()
+                t.column("source", .text).notNull() // mic | system
+                t.column("text", .text).notNull()
+            }
+            try db.create(index: "meeting_segment_on_meeting", on: "meeting_segment", columns: ["meeting_id", "ts"])
+        }
+
         return migrator
     }
 }
