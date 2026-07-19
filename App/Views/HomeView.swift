@@ -9,6 +9,9 @@ struct HomeView: View {
     /// Reports the height the body wants (current answer + composer) so the
     /// notch can grow to fit the answer — capped by the view model.
     var onBodyHeightChange: (CGFloat) -> Void = { _ in }
+    /// Reports whether the user has scrolled up into history (the panel then
+    /// opens to a comfortable reading height).
+    var onBrowsingChange: (Bool) -> Void = { _ in }
 
     @State private var isDropTargeted = false
     @FocusState private var inputFocused: Bool
@@ -47,7 +50,10 @@ struct HomeView: View {
         // instead of collapsing and re-growing.
         if chat.phase == .responding, answerMessages.isEmpty { return }
         let content = answerMessages.isEmpty ? greetingBaseHeight : answerHeight
-        onBodyHeightChange(content + composerHeight + 14)
+        // +14 covers the inter-row gap above the answer when history precedes it,
+        // so the answer's first line never sits inside the top fade.
+        let spacingAllowance: CGFloat = priorMessages.isEmpty ? 16 : 30
+        onBodyHeightChange(content + composerHeight + spacingAllowance)
     }
 
     var body: some View {
@@ -106,11 +112,11 @@ struct HomeView: View {
                                 MessageRow(message: message)
                             }
                         }
+                        .id("live-bottom")
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                             answerHeight = height
                             reportBodyHeight()
                         }
-                        Color.clear.frame(height: 1).id("live-bottom")
                     }
                 }
                 .padding(.top, 4)
@@ -125,6 +131,13 @@ struct HomeView: View {
             }
         }
         .defaultScrollAnchor(.bottom)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            let distanceFromBottom = geometry.contentSize.height
+                - (geometry.contentOffset.y + geometry.containerSize.height)
+            return distanceFromBottom > 40
+        } action: { _, browsing in
+            onBrowsingChange(browsing)
+        }
         .scrollIndicators(.hidden)
         .mask {
             // Content dissolves at the edges instead of clipping hard. Kept
@@ -209,15 +222,14 @@ struct HomeView: View {
             }
             .padding(.leading, 16)
             .padding(.trailing, 8)
-            .padding(.vertical, 10)
+            .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(.white.opacity(0.08))
                     .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1))
             )
-            .padding(.bottom, 2)
         }
-        .padding(.top, 6)
+        .padding(.top, 4)
         .animation(.snappy, value: chat.errorText)
         .animation(.snappy, value: chat.attachments)
         .animation(.snappy, value: chat.phase)

@@ -100,6 +100,7 @@ struct NotchView: View {
         .animation(tabAnimation, value: vm.selectedTab)
         .animation(sizeAnimation, value: showsListening)
         .animation(tabAnimation, value: vm.homeBodyHeight) // answer-fitted growth
+        .animation(tabAnimation, value: vm.homeBrowsingHistory) // 30% reading height
         .animation(.easeInOut(duration: 0.35), value: showsGlow)
     }
 
@@ -158,7 +159,7 @@ struct NotchView: View {
                     // and add breathing room so content never crowds the border.
                     .padding(.horizontal, 34)
                     .padding(.top, 8)
-                    .padding(.bottom, 26)
+                    .padding(.bottom, 16)
                     .clipped()
                     .overlay(alignment: .bottom) {
                         if let chat, let request = chat.agent.presenter.current {
@@ -231,6 +232,8 @@ struct NotchView: View {
                     if abs((vm.homeBodyHeight ?? 0) - bodyHeight) > 8 {
                         vm.homeBodyHeight = bodyHeight
                     }
+                } onBrowsingChange: { browsing in
+                    vm.homeBrowsingHistory = browsing
                 }
             case .history:
                 HistoryView(sessions: chat.sessions)
