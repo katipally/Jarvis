@@ -5,6 +5,7 @@ struct NotchView: View {
     var core: JarvisCore?
     var chat: ChatStore?
     var voice: VoiceController?
+    var meetings: MeetingService?
     @State private var isHovering = false
     @Namespace private var tabPillNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -29,9 +30,20 @@ struct NotchView: View {
 
     private var agentWorking: Bool { chat?.phase == .responding }
 
-    /// Glow appears only while the agent is working or the mic is listening, and
-    /// only on the notch the user is looking at (active screen or the open one).
+    /// The notch is closed but Jarvis is busy (answering, or an unread proactive
+    /// nudge is waiting): show a dim, slow border pulse so activity is visible
+    /// without opening the panel. Never fights the listening chrome.
+    private var showsClosedActivity: Bool {
+        vm.state == .closed && !showsListening
+            && (agentWorking || chat?.hasUnreadProactive == true)
+    }
+
+    /// Glow appears while the agent is working or the mic is listening (only on
+    /// the notch the user is looking at — active screen or the open one), while
+    /// the panel is open, OR — dimly — while the closed notch works in the
+    /// background.
     private var showsGlow: Bool {
+        if showsClosedActivity { return true }
         guard isVoiceHost || vm.state == .open else { return false }
         if agentWorking { return true }
         if chat?.hasUnreadProactive == true { return true }
@@ -85,7 +97,8 @@ struct NotchView: View {
                 NotchGlow(
                     topCornerRadius: topCornerRadius,
                     bottomCornerRadius: bottomCornerRadius,
-                    intensity: voice?.phase == .ready ? 1.0 : 0.85
+                    intensity: showsClosedActivity ? 0.4 : (voice?.phase == .ready ? 1.0 : 0.85),
+                    slowPulse: showsClosedActivity
                 )
                 .frame(width: displayedSize.width, height: displayedSize.height)
                 // Tiny even bleed so the border glow peeks from behind the edges.
@@ -226,7 +239,7 @@ struct NotchView: View {
         if let core, let chat {
             switch vm.selectedTab {
             case .home:
-                HomeView(chat: chat, voice: voice) { bodyHeight in
+                HomeView(chat: chat, voice: voice, meetings: meetings) { bodyHeight in
                     // Grow the notch to fit the answer (NotchViewModel caps at
                     // half the screen); ignore sub-8pt jitter during streaming.
                     if abs((vm.homeBodyHeight ?? 0) - bodyHeight) > 4 {
@@ -238,9 +251,11 @@ struct NotchView: View {
             case .history:
                 HistoryView(sessions: chat.sessions)
             case .activity:
-                ActivityView(agent: chat.agent, graphReader: chat.graphReader)
+                ActivityView(agent: chat.agent, graphReader: chat.graphReader,
+                             memoryStore: chat.memory?.store,
+                             taskStore: TaskStore(database: core.database))
             case .settings:
-                SettingsView(core: core)
+                SettingsView(core: core, screenBuffer: chat.agent.screenBuffer)
             }
         } else {
             ProgressView().controlSize(.small)

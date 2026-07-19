@@ -45,6 +45,10 @@ struct GraphView: View {
         }
         .task { await reload() }
         .onChange(of: includeHistory) { _, _ in Task { await reload() } }
+        .onReceive(NotificationCenter.default.publisher(for: .jarvisGraphDidChange)) { _ in
+            // Posted on the main actor by MemoryStore, so it's safe to reload here.
+            Task { await reload() }
+        }
         .onDisappear { layout?.cancel() }
     }
 

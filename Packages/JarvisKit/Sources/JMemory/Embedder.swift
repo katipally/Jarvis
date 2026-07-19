@@ -2,25 +2,31 @@ import Accelerate
 import Foundation
 @preconcurrency import NaturalLanguage
 
-/// On-device sentence embeddings via Apple's NaturalLanguage framework.
-/// Produces a fixed-dimension vector per text; cosine similarity via Accelerate.
-/// `NLEmbedding` is a read-only model, safe to share across threads.
+/// On-device sentence embeddings via Apple's `NLContextualEmbedding` (BERT-class
+/// contextual model). A sentence vector is produced by MEAN-POOLING the model's
+/// per-token vectors, then unit-normalizing so cosine similarity is a dot product.
+/// The model is loaded lazily on first use (loading is expensive) and its assets
+/// are downloaded over-the-air, so when they aren't present `embed()` returns nil
+/// and retrieval degrades to FTS-only (handled in MemoryStore).
 public struct Embedder: @unchecked Sendable {
     public let modelID: String
-    private let embedding: NLEmbedding?
+    private let model: Model?
 
     public init(language: NLLanguage = .english) {
-        self.embedding = NLEmbedding.sentenceEmbedding(for: language)
-        self.modelID = "nl-sentence-\(language.rawValue)"
+        self.model = NLContextualEmbedding(language: language).map { Model(embedding: $0, language: language) }
+        // Bumped from the old NLEmbedding id so a boot re-embed replaces the
+        // old (differently-dimensioned) vectors — see MemoryStore.reembedMissing().
+        self.modelID = "nl-contextual-v1"
     }
 
-    public var isAvailable: Bool { embedding != nil }
-    public var dimension: Int { embedding?.dimension ?? 0 }
+    public var isAvailable: Bool { model != nil }
+    public var dimension: Int { model?.dimension ?? 0 }
 
-    /// Embed text to a unit-normalized Float vector, or nil if unavailable.
+    /// Embed text to a unit-normalized Float vector, or nil if the model / its
+    /// assets are unavailable or the text produced no tokens.
     public func embed(_ text: String) -> [Float]? {
-        guard let embedding, let vector = embedding.vector(for: text.lowercased()) else { return nil }
-        var floats = vector.map(Float.init)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let model, var floats = model.meanPooledVector(for: trimmed) else { return nil }
         Self.normalize(&floats)
         return floats
     }
@@ -55,5 +61,57 @@ public struct Embedder: @unchecked Sendable {
         guard norm > 0 else { return }
         var inv = 1 / norm
         vDSP_vsmul(v, 1, &inv, &v, 1, vDSP_Length(v.count))
+    }
+}
+
+/// Reference-type holder so an immutable, shared `Embedder` can lazily load the
+/// (expensive) contextual model exactly once and serialize inference — the
+/// underlying model isn't documented as concurrency-safe.
+private final class Model: @unchecked Sendable {
+    private let embedding: NLContextualEmbedding
+    private let language: NLLanguage
+    private let lock = NSLock()
+    /// nil = not yet loaded, true = loaded, false = load failed / assets missing.
+    private var loaded: Bool?
+
+    let dimension: Int
+
+    init(embedding: NLContextualEmbedding, language: NLLanguage) {
+        self.embedding = embedding
+        self.language = language
+        self.dimension = embedding.dimension
+    }
+
+    /// Mean-pool the per-token contextual vectors into one sentence vector.
+    func meanPooledVector(for text: String) -> [Float]? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard ensureLoaded(),
+              let result = try? embedding.embeddingResult(for: text, language: language) else { return nil }
+
+        var sum = [Double](repeating: 0, count: dimension)
+        var count = 0
+        result.enumerateTokenVectors(in: text.startIndex..<text.endIndex) { tokenVector, _ in
+            let n = min(tokenVector.count, sum.count)
+            for i in 0..<n { sum[i] += tokenVector[i] }
+            count += 1
+            return true
+        }
+        guard count > 0 else { return nil }
+        return sum.map { Float($0 / Double(count)) }
+    }
+
+    /// Load the model on first use; assets download over-the-air, so this fails
+    /// (and we stay `false`) when they aren't on device.
+    private func ensureLoaded() -> Bool {
+        if let loaded { return loaded }
+        guard embedding.hasAvailableAssets else { loaded = false; return false }
+        do {
+            try embedding.load()
+            loaded = true
+        } catch {
+            loaded = false
+        }
+        return loaded ?? false
     }
 }

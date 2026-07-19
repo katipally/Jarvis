@@ -322,6 +322,7 @@ final class ChatStore {
             self.phase = .idle
             self.deliverQueuedProactive()
             if !interrupted { self.onRunComplete?() }
+            self.memory?.turnCompleted() // debounced memory extraction after each user turn
         }
     }
 

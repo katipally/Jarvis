@@ -6,6 +6,7 @@ import SwiftUI
 struct HomeView: View {
     @Bindable var chat: ChatStore
     var voice: VoiceController?
+    var meetings: MeetingService?
     /// Reports the height the body wants (current answer + composer) so the
     /// notch can grow to fit the answer — capped by the view model.
     var onBodyHeightChange: (CGFloat) -> Void = { _ in }
@@ -79,6 +80,13 @@ struct HomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let meetings, meetings.isActive {
+                MeetingTranscriptCard(appName: meetings.activeAppName, lines: meetings.lines) {
+                    meetings.stopMeeting()
+                }
+                .padding(.bottom, 8)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
             transcript
             // While browsing history the composer folds into a single compact
             // button, freeing its space for reading. Clicking it is the ONLY
@@ -424,6 +432,11 @@ private struct GreetingView: View {
 struct MessageRow: View {
     let message: DisplayMessage
 
+    /// Reasoning timing, measured live from this row's stream (nil for restored
+    /// history, where the elapsed time can't be reconstructed).
+    @State private var thinkingStartedAt: Date?
+    @State private var thinkingDuration: TimeInterval?
+
     var body: some View {
         switch message.role {
         case .tool:
@@ -454,21 +467,35 @@ struct MessageRow: View {
                 }
             }
         default:
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
+                if !message.thinking.isEmpty {
+                    ThinkingDisclosure(text: message.thinking, duration: thinkingDuration)
+                }
                 if message.isError {
                     Label(message.text, systemImage: "exclamationmark.triangle.fill")
                         .symbolRenderingMode(.hierarchical)
                         .font(.system(size: 12))
                         .foregroundStyle(Color.jarvisError)
-                } else if message.text.isEmpty && message.isStreaming {
-                    ThinkingDots()
-                } else {
+                } else if !message.text.isEmpty {
                     Markdown(message.text)
                         .markdownTheme(.jarvis)
                         .textSelection(.enabled)
+                } else if message.isStreaming {
+                    ThinkingDots()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .onAppear {
+                if !message.thinking.isEmpty, thinkingStartedAt == nil { thinkingStartedAt = Date() }
+            }
+            .onChange(of: message.thinking.isEmpty) { _, isEmpty in
+                if !isEmpty, thinkingStartedAt == nil { thinkingStartedAt = Date() }
+            }
+            .onChange(of: message.text.isEmpty) { _, textEmpty in
+                if !textEmpty, thinkingDuration == nil, let start = thinkingStartedAt {
+                    thinkingDuration = Date.now.timeIntervalSince(start)
+                }
+            }
         }
     }
 }
@@ -478,6 +505,9 @@ private struct ToolRow: View {
 
     @State private var expanded = false
     @State private var startedAt = Date()
+    /// Frozen elapsed once the tool finishes, so the timing survives after the
+    /// live timer stops. Only set when this row observed the running→done edge.
+    @State private var finishedElapsed: TimeInterval?
 
     private var symbol: String {
         switch message.toolState {
@@ -525,6 +555,11 @@ private struct ToolRow: View {
                             .font(.jarvisFootnote)
                             .monospacedDigit()
                             .foregroundStyle(.white.opacity(0.55))
+                    } else if let finishedElapsed {
+                        Text(Self.durationText(finishedElapsed))
+                            .font(.jarvisFootnote)
+                            .monospacedDigit()
+                            .foregroundStyle(.white.opacity(0.5))
                     }
                     Spacer(minLength: 0)
                     if hasOutput {
@@ -558,6 +593,17 @@ private struct ToolRow: View {
                 .fill(Color.jarvisSurface)
                 .strokeBorder(Color.jarvisStroke, lineWidth: 1)
         )
+        .onChange(of: message.toolState) { old, new in
+            if old == .running, new == .done || new == .error, finishedElapsed == nil {
+                finishedElapsed = Date.now.timeIntervalSince(startedAt)
+            }
+        }
+    }
+
+    private static func durationText(_ t: TimeInterval) -> String {
+        if t < 1 { return "<1s" }
+        if t < 60 { return String(format: "%.0fs", t) }
+        return "\(Int(t) / 60)m \(Int(t) % 60)s"
     }
 }
 
@@ -613,6 +659,73 @@ private struct AttachmentChip: View {
         .padding(.trailing, 2)
         .padding(.vertical, 4)
         .background(Capsule().fill(.white.opacity(0.1)))
+    }
+}
+
+/// Collapsed reasoning shown above an answer. `DisplayMessage.thinking` is
+/// captured while streaming but was never surfaced; this reveals it on demand.
+private struct ThinkingDisclosure: View {
+    let text: String
+    var duration: TimeInterval?
+
+    @State private var expanded = false
+
+    private var title: String {
+        if let duration, duration >= 0.5 {
+            return "Thought for \(Int(duration.rounded()))s"
+        }
+        return "Thought process"
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            ScrollView {
+                Text(text)
+                    .font(.jarvisCaption)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 160)
+            .padding(.top, 4)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "brain")
+                    .font(.system(size: 9))
+                Text(title)
+                    .font(.jarvisCaption.weight(.medium))
+            }
+            .foregroundStyle(.white.opacity(0.5))
+        }
+        .disclosureGroupStyle(ThinkingDisclosureStyle())
+    }
+}
+
+/// A rotating chevron instead of the platform disclosure triangle, matching the
+/// notch's tool rows.
+private struct ThinkingDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) { configuration.isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    configuration.label
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .pointerStyle(.link)
+
+            if configuration.isExpanded {
+                configuration.content
+                    .transition(.opacity)
+            }
+        }
     }
 }
 

@@ -5,11 +5,13 @@ import JMemory
 /// In-turn memory: explicit writes ("remember that…") and recall search.
 /// Both auto-run — they touch only Jarvis's local memory store.
 enum MemoryTools {
-    static func registry(store: MemoryStore) -> [ToolSpec] {
-        [remember(store), searchMemory(store)]
+    /// Pass `memory` so `remember` grows the knowledge graph (entities/relations)
+    /// too; without it, remember still writes the plain memory row.
+    static func registry(store: MemoryStore, memory: MemoryService? = nil) -> [ToolSpec] {
+        [remember(store, memory), searchMemory(store)]
     }
 
-    private static func remember(_ store: MemoryStore) -> ToolSpec {
+    private static func remember(_ store: MemoryStore, _ memory: MemoryService?) -> ToolSpec {
         ToolSpec(
             name: "remember",
             description: "Save a fact durably to long-term memory, effective immediately. Use when the user says 'remember…', states a lasting preference, or shares a fact about themselves worth keeping. Store one self-contained sentence.",
@@ -20,8 +22,11 @@ enum MemoryTools {
         ) { input, _ in
             guard let text = str(input, "text") else { return ToolOutput("Missing 'text'.", isError: true) }
             let kind = str(input, "kind").flatMap(MemoryKind.init(rawValue:)) ?? .fact
-            let result = ExtractionResult(memories: [ExtractedMemory(kind: kind, text: text, importance: 0.8)])
-            await store.ingest(result, segmentID: nil)
+            if let memory {
+                await memory.remember(text, kind: kind)
+            } else {
+                await store.ingest(ExtractionResult(memories: [ExtractedMemory(kind: kind, text: text, importance: 0.8)]), segmentID: nil)
+            }
             return ToolOutput("Remembered.")
         }
     }

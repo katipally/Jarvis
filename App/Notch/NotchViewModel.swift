@@ -45,7 +45,6 @@ final class NotchViewModel {
     @ObservationIgnored private weak var window: NSWindow?
     @ObservationIgnored private var openedAt: Date?
     @ObservationIgnored private var hoverOpenTask: Task<Void, Never>?
-    @ObservationIgnored private var hoverCloseTask: Task<Void, Never>?
 
     static let shadowPadding: CGFloat = 22
 
@@ -193,12 +192,7 @@ final class NotchViewModel {
         return Date.now.timeIntervalSince(openedAt) > 0.6
     }
 
-    var pointerIsInsideVisibleRegion: Bool {
-        visibleRect(open: state == .open).insetBy(dx: -10, dy: -10).contains(NSEvent.mouseLocation)
-    }
-
     func hoverEntered(delay: TimeInterval = 0.28) {
-        hoverCloseTask?.cancel()
         guard state == .closed else { return }
 
         hoverOpenTask?.cancel()
@@ -209,27 +203,19 @@ final class NotchViewModel {
         }
     }
 
-    func hoverExited(delay: TimeInterval = 0.15) {
+    /// Hover only ever OPENS. Auto-close is owned solely by
+    /// NotchScreenManager.pointerMoved (pointer-outside-for-0.75s), so leaving
+    /// the hover region here just cancels a still-pending open — it never closes.
+    func hoverExited() {
         hoverOpenTask?.cancel()
-        guard state == .open else { return }
-
-        hoverCloseTask?.cancel()
-        hoverCloseTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
-            guard !Task.isCancelled, let self,
-                  self.canAutoClose, !self.pointerIsInsideVisibleRegion else { return }
-            self.close()
-        }
     }
 
     func cancelHoverTasks() {
         hoverOpenTask?.cancel()
-        hoverCloseTask?.cancel()
     }
 
     deinit {
         hoverOpenTask?.cancel()
-        hoverCloseTask?.cancel()
     }
 
     private static func computeClosedNotchSize(for screen: NSScreen) -> CGSize {

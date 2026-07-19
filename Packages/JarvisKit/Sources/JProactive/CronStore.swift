@@ -39,6 +39,29 @@ public struct CronStore: Sendable {
         _ = try? await database.writer.write { db in try final.update(db) }
     }
 
+    /// Upserts a reserved builtin job (e.g. "builtin:morning_brief") with the
+    /// given schedule. The prompt is empty — ProactivityService composes the
+    /// body itself when a builtin id comes due. Re-runnable each launch: only
+    /// recomputes the next fire when the expression actually changed, so an
+    /// unchanged brief keeps its place in the schedule across relaunches.
+    public func ensureBuiltin(id: String, name: String, cronExpr: String, enabled: Bool, now: Date = .now) async {
+        guard let schedule = CronSchedule(cronExpr), let next = schedule.nextFire(after: now) else { return }
+        if let existing = try? await database.reader.read({ db in try CronJobRow.fetchOne(db, key: id) }),
+           var updated = existing as CronJobRow? {
+            let exprChanged = updated.cronExpr != cronExpr
+            updated.name = name
+            updated.cronExpr = cronExpr
+            updated.enabled = enabled
+            if exprChanged { updated.nextRunAt = next }
+            let final = updated
+            _ = try? await database.writer.write { db in try final.update(db) }
+        } else {
+            let job = CronJobRow(id: id, name: name, cronExpr: cronExpr, prompt: "",
+                                 enabled: enabled, nextRunAt: next, createdAt: now)
+            _ = try? await database.writer.write { db in try job.insert(db) }
+        }
+    }
+
     public func list() async -> [CronJobRow] {
         (try? await database.reader.read { db in
             try CronJobRow.order(Column("created_at").desc).fetchAll(db)

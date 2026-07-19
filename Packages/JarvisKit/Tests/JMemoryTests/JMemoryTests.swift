@@ -85,3 +85,41 @@ private func makeStore() throws -> (MemoryStore, JarvisDatabase) {
     let longCount = try await db.reader.read { db in try MemoryRow.filter(Column("tier") == "long").fetchCount(db) }
     #expect(longCount == 1)
 }
+
+@Test func supersedeRetiresFTSMatch() async throws {
+    let (store, db) = try makeStore()
+    await store.ingest(ExtractionResult(memories: [
+        ExtractedMemory(kind: .fact, text: "Yash works at Acme Corporation"),
+        ExtractedMemory(kind: .fact, text: "Yash enjoys hiking on weekends"),
+    ]), segmentID: "s1")
+
+    await store.supersede(matching: ["Yash no longer works at Acme"])
+
+    let (superseded, active) = try await db.reader.read { db -> (Int, Int) in
+        let superseded = try MemoryRow.filter(Column("status") == "superseded").fetchCount(db)
+        let active = try MemoryRow.filter(Column("status") == "active").fetchCount(db)
+        return (superseded, active)
+    }
+    // The Acme memory is retired by the invalidation; hiking stays active.
+    #expect(superseded == 1)
+    #expect(active == 1)
+}
+
+@Test func listUpdateArchiveRoundTrip() async throws {
+    let (store, _) = try makeStore()
+    await store.ingest(ExtractionResult(memories: [
+        ExtractedMemory(kind: .preference, text: "Yash prefers dark mode"),
+    ]), segmentID: "s1")
+
+    var items = await store.list()
+    #expect(items.count == 1)
+    guard let id = items.first?.id else { return }
+
+    await store.update(id: id, text: "Yash prefers light mode")
+    items = await store.list()
+    #expect(items.first?.text == "Yash prefers light mode")
+
+    await store.archive(id: id)
+    items = await store.list()
+    #expect(items.isEmpty) // archived rows drop out of the active list
+}

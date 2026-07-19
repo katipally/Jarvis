@@ -1,0 +1,85 @@
+import Foundation
+import GRDB
+import JStore
+
+/// CRUD over the `commitment` and `task` tables (v10). Shared so the memory
+/// pipeline (which writes them from extraction) and proactivity (which fires
+/// commitments and surfaces tasks) don't each reinvent the queries.
+struct TaskStore: Sendable {
+    let database: JarvisDatabase
+
+    // MARK: - Commitments
+
+    /// Inserts a commitment unless an open one with the same dedupe key exists.
+    func addCommitment(text: String, dueAt: Date?, dedupeKey: String?, segmentID: String?) async {
+        _ = try? await database.writer.write { db in
+            if let dedupeKey {
+                let existing = try CommitmentRow
+                    .filter(Column("dedupe_key") == dedupeKey)
+                    .filter(Column("status") == CommitmentRow.Status.open.rawValue)
+                    .fetchCount(db)
+                if existing > 0 { return }
+            }
+            try CommitmentRow(text: text, dueAt: dueAt, dedupeKey: dedupeKey,
+                              sourceSegmentId: segmentID).insert(db)
+        }
+    }
+
+    /// Open commitments whose due time falls at or before `cutoff`.
+    func dueCommitments(by cutoff: Date) async -> [CommitmentRow] {
+        (try? await database.reader.read { db in
+            try CommitmentRow
+                .filter(Column("status") == CommitmentRow.Status.open.rawValue)
+                .filter(Column("due_at") != nil && Column("due_at") <= cutoff)
+                .order(Column("due_at"))
+                .fetchAll(db)
+        }) ?? []
+    }
+
+    func openCommitments() async -> [CommitmentRow] {
+        (try? await database.reader.read { db in
+            try CommitmentRow
+                .filter(Column("status") == CommitmentRow.Status.open.rawValue)
+                .order(Column("due_at"))
+                .fetchAll(db)
+        }) ?? []
+    }
+
+    func setCommitmentStatus(_ id: String, _ status: CommitmentRow.Status) async {
+        _ = try? await database.writer.write { db in
+            try db.execute(sql: "UPDATE commitment SET status = ? WHERE id = ?",
+                           arguments: [status.rawValue, id])
+        }
+    }
+
+    // MARK: - Tasks
+
+    /// Inserts a task unless an identical-text one is already suggested/open.
+    func addTask(text: String, source: TaskRow.Source, sourceID: String?, dueAt: Date? = nil) async {
+        _ = try? await database.writer.write { db in
+            let dup = try TaskRow
+                .filter(Column("text") == text)
+                .filter([TaskRow.Status.suggested.rawValue, TaskRow.Status.open.rawValue].contains(Column("status")))
+                .fetchCount(db)
+            if dup > 0 { return }
+            try TaskRow(text: text, source: source, sourceId: sourceID, dueAt: dueAt).insert(db)
+        }
+    }
+
+    func tasks(statuses: [TaskRow.Status]) async -> [TaskRow] {
+        let raw = statuses.map(\.rawValue)
+        return (try? await database.reader.read { db in
+            try TaskRow
+                .filter(raw.contains(Column("status")))
+                .order(Column("created_at").desc)
+                .fetchAll(db)
+        }) ?? []
+    }
+
+    func setTaskStatus(_ id: String, _ status: TaskRow.Status) async {
+        _ = try? await database.writer.write { db in
+            try db.execute(sql: "UPDATE task SET status = ? WHERE id = ?",
+                           arguments: [status.rawValue, id])
+        }
+    }
+}

@@ -1,14 +1,17 @@
 import JAgent
+import JScreen
 import JStore
 import SwiftUI
 
 struct SettingsView: View {
     @Bindable var core: JarvisCore
+    let screenBuffer: ScreenBuffer
 
     @State private var modelsByAccount: [String: [ProviderModel]] = [:]
     @State private var loadingModels: Set<String> = []
     @State private var showAddProvider = false
     @State private var pendingDelete: ProviderAccount?
+    @State private var meetingsEnabled = false
 
     private static let sessionGapChoices = [2, 5, 10, 15, 30, 60]
 
@@ -18,6 +21,9 @@ struct SettingsView: View {
                 providersSection
                 rolesSection
                 sessionsSection
+                ProactivitySettings(settings: core.settings)
+                ScreenRewindSection(settings: core.settings, screenBuffer: screenBuffer)
+                meetingsSection
                 PermissionsDashboard()
             }
             .padding(.vertical, 16)
@@ -237,6 +243,39 @@ struct SettingsView: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.08)))
     }
 
+    // MARK: - Meetings (opt-in)
+
+    private var meetingsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Meetings", trailing: nil, action: nil)
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Transcribe meetings")
+                        .font(.jarvisBody)
+                        .foregroundStyle(.white.opacity(0.85))
+                    Text("When a call app (Zoom, Teams, FaceTime, Webex, Slack, Discord) comes to the front, Jarvis records an on-device transcript and summarizes it when the call ends. Needs Screen Recording permission (that is what grants system-audio capture).")
+                        .font(.jarvisFootnote)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { meetingsEnabled },
+                    set: { newValue in
+                        meetingsEnabled = newValue
+                        Task { try? await core.settings.set(MeetingService.settingKey, to: newValue) }
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(Color.jarvisAccent)
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.jarvisSurface))
+        }
+        .task { meetingsEnabled = ((try? await core.settings.get(MeetingService.settingKey, as: Bool.self)) ?? nil) ?? false }
+    }
+
     private func sectionHeader(_ title: String, trailing: String?, action: (() -> Void)?) -> some View {
         HStack {
             Text(title.uppercased()).font(.jarvisCaption.weight(.semibold)).foregroundStyle(.white.opacity(0.5)).tracking(0.5)
@@ -397,5 +436,160 @@ private struct AddProviderForm: View {
                 saving = false
             }
         }
+    }
+}
+
+// MARK: - Proactivity section (Phase 6)
+
+private struct ProactivitySettings: View {
+    let settings: SettingsStore
+    @State private var muted = false
+    @State private var aggressiveness = "balanced"
+    @State private var briefTime = "09:00"
+    @State private var recapEnabled = false
+    @State private var recapTime = "18:30"
+    @State private var tokenBudget = 200_000
+
+    private static let times: [String] = (0..<24).flatMap { h in ["00", "30"].map { String(format: "%02d:", h) + $0 } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("PROACTIVITY").font(.jarvisCaption.weight(.semibold)).foregroundStyle(.white.opacity(0.5)).tracking(0.5)
+            VStack(spacing: 12) {
+                Toggle(isOn: $muted) { label("Mute proactivity", "Silence all nudges, briefs, and reminders.") }.tint(.jarvisLink)
+                row("Aggressiveness", "How readily Jarvis interrupts — scales cooldown and daily cap.") {
+                    Picker("", selection: $aggressiveness) {
+                        Text("Relaxed").tag("relaxed"); Text("Balanced").tag("balanced"); Text("Eager").tag("eager")
+                    }.pickerStyle(.menu).buttonStyle(.plain).tint(.white).fixedSize()
+                }
+                row("Morning brief", "A short daily brief at this time.") {
+                    Picker("", selection: $briefTime) { ForEach(Self.times, id: \.self) { Text($0).tag($0) } }
+                        .pickerStyle(.menu).buttonStyle(.plain).tint(.white).fixedSize()
+                }
+                Toggle(isOn: $recapEnabled) { label("Evening recap", "An end-of-day recap (off by default).") }.tint(.jarvisLink)
+                if recapEnabled {
+                    row("Recap time", nil) {
+                        Picker("", selection: $recapTime) { ForEach(Self.times, id: \.self) { Text($0).tag($0) } }
+                            .pickerStyle(.menu).buttonStyle(.plain).tint(.white).fixedSize()
+                    }
+                }
+                row("Daily token budget", "Ceiling for all background/proactive model spend.") {
+                    TextField("", value: $tokenBudget, format: .number)
+                        .frame(width: 90).multilineTextAlignment(.trailing).textFieldStyle(.plain).foregroundStyle(.white)
+                }
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.jarvisSurface))
+        }
+        .task { await load() }
+        .onChange(of: muted) { _, v in Task { try? await settings.set("proactive_muted", to: v) } }
+        .onChange(of: aggressiveness) { _, v in Task { try? await settings.set("proactive_aggressiveness", to: v) } }
+        .onChange(of: briefTime) { _, v in Task { try? await settings.set("brief_time", to: v) } }
+        .onChange(of: recapEnabled) { _, v in Task { try? await settings.set("recap_enabled", to: v) } }
+        .onChange(of: recapTime) { _, v in Task { try? await settings.set("recap_time", to: v) } }
+        .onChange(of: tokenBudget) { _, v in Task { try? await settings.set("proactive_token_budget", to: v) } }
+    }
+
+    private func label(_ title: String, _ subtitle: String?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.jarvisBody).foregroundStyle(.white.opacity(0.85))
+            if let subtitle { Text(subtitle).font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55)).fixedSize(horizontal: false, vertical: true) }
+        }
+    }
+    private func row<T: View>(_ title: String, _ subtitle: String?, @ViewBuilder trailing: () -> T) -> some View {
+        HStack { label(title, subtitle); Spacer(); trailing() }
+    }
+    private func load() async {
+        muted = ((try? await settings.get("proactive_muted", as: Bool.self)) ?? nil) ?? false
+        aggressiveness = ((try? await settings.get("proactive_aggressiveness", as: String.self)) ?? nil) ?? "balanced"
+        briefTime = ((try? await settings.get("brief_time", as: String.self)) ?? nil) ?? "09:00"
+        recapEnabled = ((try? await settings.get("recap_enabled", as: Bool.self)) ?? nil) ?? false
+        recapTime = ((try? await settings.get("recap_time", as: String.self)) ?? nil) ?? "18:30"
+        tokenBudget = ((try? await settings.get("proactive_token_budget", as: Int.self)) ?? nil) ?? 200_000
+    }
+}
+
+// MARK: - Screen Rewind section (Phase 5)
+
+private struct ScreenRewindSection: View {
+    let settings: SettingsStore
+    let screenBuffer: ScreenBuffer
+
+    @State private var policy = ScreenCapturePolicy.default
+    @State private var excludedText = ""
+
+    private static let retentionChoices = [24, 72, 168]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("SCREEN REWIND")
+                .font(.jarvisCaption.weight(.semibold)).foregroundStyle(.white.opacity(0.5)).tracking(0.5)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Toggle(isOn: Binding(
+                    get: { policy.enabled },
+                    set: { on in apply { $0.enabled = on } }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Capture my screen").font(.jarvisBody).foregroundStyle(.white.opacity(0.85))
+                        Text("Passively snapshots the front window so you can search and rewind what you saw. Stored only on this Mac.")
+                            .font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(Color.jarvisAccent)
+
+                if policy.enabled {
+                    Divider().overlay(Color.jarvisStroke)
+
+                    HStack {
+                        Text("Keep history for").font(.jarvisBody).foregroundStyle(.white.opacity(0.85))
+                        Spacer()
+                        Picker("", selection: Binding(
+                            get: { policy.retentionHours },
+                            set: { hours in apply { $0.retentionHours = hours } }
+                        )) {
+                            ForEach(Self.retentionChoices, id: \.self) { hours in
+                                Text(label(forHours: hours)).tag(hours)
+                            }
+                        }
+                        .pickerStyle(.menu).buttonStyle(.plain).tint(.white).fixedSize()
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Never capture these apps").font(.jarvisBody).foregroundStyle(.white.opacity(0.85))
+                        Text("Comma-separated bundle IDs (password managers are always excluded).")
+                            .font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55))
+                            .fixedSize(horizontal: false, vertical: true)
+                        TextField("com.apple.Notes, com.tinyspeck.slackmacgap", text: $excludedText)
+                            .textFieldStyle(.roundedBorder).font(.jarvisCaption)
+                            .onSubmit { commitExcluded() }
+                    }
+                }
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.jarvisSurface))
+        }
+        .task {
+            policy = await ScreenCapturePolicy.load(from: settings)
+            excludedText = policy.excludedBundleIDs.joined(separator: ", ")
+        }
+    }
+
+    private func label(forHours hours: Int) -> String {
+        switch hours { case 24: "1 day"; case 168: "1 week"; default: "3 days" }
+    }
+
+    private func commitExcluded() {
+        let ids = excludedText.split(whereSeparator: { $0 == "," || $0 == " " }).map(String.init)
+        apply { $0.excludedBundleIDs = ids }
+    }
+
+    private func apply(_ mutate: (inout ScreenCapturePolicy) -> Void) {
+        var updated = policy
+        mutate(&updated)
+        policy = updated
+        screenBuffer.setPolicy(updated)
+        Task { await updated.save(to: settings) }
     }
 }

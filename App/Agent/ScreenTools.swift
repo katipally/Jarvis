@@ -7,7 +7,26 @@ import JScreen
 /// Recording on first take_screenshot).
 enum ScreenTools {
     static func registry(recall: ScreenRecall, buffer: ScreenBuffer) -> [ToolSpec] {
-        [recallScreen(recall), fetchFrames(recall), takeScreenshot(buffer)]
+        [recallScreen(recall), searchScreen(recall), fetchFrames(recall), takeScreenshot(buffer)]
+    }
+
+    private static func searchScreen(_ recall: ScreenRecall) -> ToolSpec {
+        ToolSpec(
+            name: "search_screen",
+            description: "Full-text search the OCR'd text from the user's past screen frames (screen rewind). Use to find when and where the user saw something — an error message, a name, a URL, a code snippet. Returns matching frames with a text snippet, app, window title, time, and frame id (pass ids to fetch_frames to actually see them).",
+            parameters: obj([p("query", "Words to look for in past on-screen text"), pInt("limit", "Max results (default 20)")], required: ["query"]),
+            tier: .readOnly, sensitive: true
+        ) { input, _ in
+            guard let query = str(input, "query") else { return ToolOutput("Missing 'query'.", isError: true) }
+            let hits = await recall.search(query, limit: int(input, "limit") ?? 20)
+            if hits.isEmpty { return ToolOutput("No screen text matched \"\(query)\".") }
+            let lines = hits.map { hit in
+                "\(hit.id) · \(hit.ts.formatted(date: .abbreviated, time: .shortened)) · \(hit.appName ?? "?")"
+                    + (hit.windowTitle.map { " — \($0)" } ?? "")
+                    + "\n    \(hit.snippet.replacingOccurrences(of: "\n", with: " "))"
+            }
+            return ToolOutput("Screen matches (id · time · app · window):\n" + lines.joined(separator: "\n"))
+        }
     }
 
     private static func recallScreen(_ recall: ScreenRecall) -> ToolSpec {

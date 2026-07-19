@@ -18,7 +18,7 @@ public struct MemoryStore: Sendable {
 
     /// Write extraction output: memories (short-term) + graph projection.
     public func ingest(_ result: ExtractionResult, segmentID: String?, now: Date = .now) async {
-        _ = try? await database.writer.write { db in
+        let graphChanged = (try? await database.writer.write { db -> Bool in
             for memory in result.memories {
                 let clean = memory.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !clean.isEmpty else { continue }
@@ -29,12 +29,16 @@ public struct MemoryStore: Sendable {
                     .fetchCount(db) > 0
                 if exists { continue }
 
+                // Semantic near-duplicate: skip when a paraphrase is already stored.
+                let vector = embedder.embed(clean)
+                if let vector, try isNearDuplicate(db, vector: vector, threshold: 0.92) { continue }
+
                 let row = MemoryRow(
                     tier: "short", kind: memory.kind.rawValue, text: clean,
                     importance: memory.importance, sourceSegmentId: segmentID, createdAt: now, updatedAt: now
                 )
                 try row.insert(db)
-                if let vector = embedder.embed(clean) {
+                if let vector {
                     try EmbeddingRow(
                         ownerKind: "memory", ownerId: row.id, modelId: embedder.modelID,
                         dim: vector.count, vector: Embedder.data(from: vector)
@@ -61,6 +65,17 @@ public struct MemoryStore: Sendable {
                 nodeIDs[objNorm] = dst
                 try upsertEdge(db, src: src, dst: dst, relation: relation.relation, now: now)
             }
+            return !result.entities.isEmpty || !result.relations.isEmpty
+        }) ?? false
+
+        // Nudge the graph/memory UI to reload after nodes or relations land.
+        if graphChanged { Self.postGraphChange() }
+    }
+
+    /// Post on the main actor so SwiftUI observers mutate view state safely.
+    private static func postGraphChange() {
+        Task { @MainActor in
+            NotificationCenter.default.post(name: .jarvisGraphDidChange, object: nil)
         }
     }
 
@@ -157,6 +172,21 @@ public struct MemoryStore: Sendable {
         return scored.sorted { $0.1 > $1.1 }.prefix(limit).map { $0 }
     }
 
+    /// True when `vector` is within the dedup threshold of an active memory's
+    /// current-model embedding — i.e. a paraphrase we already know.
+    private func isNearDuplicate(_ db: Database, vector: [Float], threshold: Float) throws -> Bool {
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT embedding.vector AS vector FROM embedding
+            JOIN memory ON memory.id = embedding.owner_id
+            WHERE embedding.owner_kind = 'memory' AND embedding.model_id = ? AND memory.status = 'active'
+            """, arguments: [embedder.modelID])
+        for row in rows {
+            let data: Data = row["vector"]
+            if Embedder.cosine(vector, Embedder.vector(from: data)) > threshold { return true }
+        }
+        return false
+    }
+
     /// Relation lines for entities mentioned in the query (graph neighborhood).
     public func graphContext(for query: String, limit: Int = 6) async -> [String] {
         let terms = query.lowercased()
@@ -213,4 +243,124 @@ public struct MemoryStore: Sendable {
                 """, arguments: StatementArguments([now] + ids))
         }
     }
+
+    // MARK: - Maintenance
+
+    /// Boot task: embed active memories that lack a vector for the current model,
+    /// and drop vectors from other model ids (a model upgrade changes the
+    /// dimension, so old rows are unusable). Inference runs outside the write
+    /// lock; only the inserts are transacted.
+    public func reembedMissing() async {
+        guard embedder.isAvailable else { return }
+        let toEmbed: [(id: String, text: String)] = (try? await database.writer.write { db -> [(id: String, text: String)] in
+            try db.execute(sql: "DELETE FROM embedding WHERE owner_kind = 'memory' AND model_id <> ?",
+                           arguments: [embedder.modelID])
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT memory.id AS id, memory.text AS text FROM memory
+                WHERE memory.status = 'active' AND NOT EXISTS (
+                    SELECT 1 FROM embedding
+                    WHERE embedding.owner_kind = 'memory'
+                      AND embedding.owner_id = memory.id
+                      AND embedding.model_id = ?)
+                """, arguments: [embedder.modelID])
+            return rows.map { row in
+                let id: String = row["id"]
+                let text: String = row["text"]
+                return (id: id, text: text)
+            }
+        }) ?? []
+        guard !toEmbed.isEmpty else { return }
+
+        let inserts: [(String, [Float])] = toEmbed.compactMap { row in
+            embedder.embed(row.text).map { (row.id, $0) }
+        }
+        guard !inserts.isEmpty else { return }
+        _ = try? await database.writer.write { db in
+            for (id, vector) in inserts {
+                try EmbeddingRow(ownerKind: "memory", ownerId: id, modelId: embedder.modelID,
+                                 dim: vector.count, vector: Embedder.data(from: vector)).insert(db)
+            }
+        }
+    }
+
+    /// Retire active memories that an invalidation phrase makes false — the best
+    /// FTS match per phrase is marked `superseded` (kept, never deleted).
+    public func supersede(matching phrases: [String], now: Date = .now) async {
+        let clean = phrases.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !clean.isEmpty else { return }
+        _ = try? await database.writer.write { db in
+            for phrase in clean {
+                let terms = phrase.lowercased()
+                    .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                    .filter { $0.count > 2 }
+                guard !terms.isEmpty else { continue }
+                let match = terms.map { "\"\($0)\"" }.joined(separator: " OR ")
+                let ids = try String.fetchAll(db, sql: """
+                    SELECT memory.id FROM memory
+                    JOIN memory_fts ON memory.rowid = memory_fts.rowid
+                    WHERE memory_fts MATCH ? AND memory.status = 'active'
+                    ORDER BY rank LIMIT 1
+                    """, arguments: [match])
+                for id in ids {
+                    try db.execute(sql: "UPDATE memory SET status = 'superseded', updated_at = ? WHERE id = ?",
+                                   arguments: [now, id])
+                }
+            }
+        }
+    }
+
+    // MARK: - Memories UI
+
+    /// One active memory for the Memories pane.
+    public struct MemoryItem: Sendable, Identifiable {
+        public let id: String
+        public let kind: String
+        public let text: String
+        public let createdAt: Date
+        public let updatedAt: Date
+    }
+
+    /// Active memories, most-recently-touched first.
+    public func list(limit: Int = 200) async -> [MemoryItem] {
+        (try? await database.reader.read { db in
+            try MemoryRow
+                .filter(Column("status") == "active")
+                .order(Column("updated_at").desc)
+                .limit(limit)
+                .fetchAll(db)
+                .map { MemoryItem(id: $0.id, kind: $0.kind, text: $0.text, createdAt: $0.createdAt, updatedAt: $0.updatedAt) }
+        }) ?? []
+    }
+
+    /// Rename a memory's text and re-embed it.
+    public func update(id: String, text: String, now: Date = .now) async {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        let vector = embedder.embed(clean)
+        _ = try? await database.writer.write { db in
+            guard var row = try MemoryRow.fetchOne(db, key: id) else { return }
+            row.text = clean
+            row.updatedAt = now
+            try row.update(db)
+            try db.execute(sql: "DELETE FROM embedding WHERE owner_kind = 'memory' AND owner_id = ?", arguments: [id])
+            if let vector {
+                try EmbeddingRow(ownerKind: "memory", ownerId: id, modelId: embedder.modelID,
+                                 dim: vector.count, vector: Embedder.data(from: vector)).insert(db)
+            }
+        }
+    }
+
+    /// Forget a memory (soft delete — kept as `archived`, out of retrieval).
+    public func archive(id: String, now: Date = .now) async {
+        _ = try? await database.writer.write { db in
+            try db.execute(sql: "UPDATE memory SET status = 'archived', updated_at = ? WHERE id = ?",
+                           arguments: [now, id])
+        }
+    }
+}
+
+public extension Notification.Name {
+    /// Posted after an ingest adds graph nodes/relations so the graph/memory UI
+    /// can reload instead of polling.
+    static let jarvisGraphDidChange = Notification.Name("jarvisGraphDidChange")
 }

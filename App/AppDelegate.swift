@@ -1,5 +1,7 @@
 import AppKit
+import JLocal
 import JMemory
+import JScreen
 import JStore
 import SwiftUI
 
@@ -14,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var memoryStore: MemoryStore?
     private var memoryService: MemoryService?
     private var proactivity: ProactivityService?
+    private var notifications: NotificationService?
+    private var meetings: MeetingService?
     private var sessions: SessionManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -30,13 +34,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let core = JarvisCore(database: database, cacheDirectory: cacheDir)
             let sessions = SessionManager(database: database)
             let memoryStore = MemoryStore(database: database)
+
+            // One shared on-device model + resolver + task store, used by memory,
+            // proactivity, and meetings (decision D3: local-first, API optional).
+            let localFirst = LocalFirst(local: LocalModel(), core: core)
+            let taskStore = TaskStore(database: database)
+
             let agent = AgentServices(database: database, supportDirectory: appSupport, memoryStore: memoryStore)
             let chat = ChatStore(core: core, sessions: sessions, agent: agent)
             let voice = VoiceController(chat: chat)
             let pushToTalk = PushToTalkMonitor(voice: voice)
 
-            // Memory: extraction on segment close + retrieval injection.
-            let memoryService = MemoryService(core: core, sessions: sessions, store: memoryStore)
+            // Memory: debounced extraction (turn-driven + boot sweep), segment
+            // digest on close, retrieval injection. Extraction runs on-device.
+            let memoryService = MemoryService(core: core, sessions: sessions, store: memoryStore,
+                                              local: localFirst, tasks: taskStore, database: database)
             chat.memory = memoryService
             chat.graphReader = GraphReader(database: database)
             self.memoryStore = memoryStore
@@ -53,24 +65,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             Task {
                 await sessions.setOnSegmentClose { segmentID in
-                    Task { @MainActor in await memoryService.extract(segmentID: segmentID) }
+                    // Segment close writes a title/summary digest; durable-memory
+                    // extraction runs continuously (turnCompleted) + at boot.
+                    Task { @MainActor in await memoryService.digestSegment(segmentID) }
                 }
-                // Segments a previous process left open (quit/crash) must close
-                // now, or their memory extraction never runs.
                 await sessions.recoverOrphanedSegments()
+                await memoryService.bootSweep() // re-embed missing vectors + resume pending extraction
             }
 
-            // Proactivity: context-switch nudges + heartbeat + cron.
-            let proactivity = ProactivityService(core: core, chat: chat, agent: agent)
+            // Proactivity v2: real notifications + tasks + commitments + briefs.
+            let notifications = NotificationService()
+            notifications.onActivate = { NSApp.activate(ignoringOtherApps: true) }
+            let proactivity = ProactivityService(
+                core: core, chat: chat, agent: agent,
+                localFirst: localFirst, tasks: taskStore, notifications: notifications,
+                memory: memoryService)
             self.proactivity = proactivity
+            self.notifications = notifications
             agent.screenBuffer.onContextSwitch = { frame in
                 Task { @MainActor in proactivity.onContextSwitch(frame) }
             }
 
-            screenManager.start(core: core, chat: chat, voice: voice)
+            // Meeting transcription (opt-in): conferencing-gated capture → summary.
+            let meetings = MeetingService(
+                database: database, localFirst: localFirst, taskStore: taskStore,
+                settings: core.settings,
+                receiveProactive: { body in chat.receiveProactive(body) },
+                ingestFact: { fact in await memoryService.remember(fact) })
+            self.meetings = meetings
+
+            screenManager.start(core: core, chat: chat, voice: voice, meetings: meetings)
             pushToTalk.start()
-            agent.screenBuffer.start() // no-op until Screen Recording is granted
+            Task {
+                let policy = await ScreenCapturePolicy.load(from: core.settings)
+                agent.screenBuffer.setPolicy(policy)
+                agent.screenBuffer.start() // no-op until Screen Recording is granted
+            }
             proactivity.start()
+            meetings.start()
+            Task {
+                let muted = ((try? await core.settings.get("proactive_muted", as: Bool.self)) ?? nil) ?? false
+                if !muted { notifications.requestAuth() }
+            }
             Task { await core.load() }
         } catch {
             let alert = NSAlert()
