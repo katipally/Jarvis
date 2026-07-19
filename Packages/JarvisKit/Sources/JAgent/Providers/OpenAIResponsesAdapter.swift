@@ -36,7 +36,7 @@ public struct OpenAIResponsesAdapter: ProviderAdapter {
                     var acc = SSEAccumulator()
                     var state = ResponsesStreamState()
 
-                    for try await line in bytes.lines {
+                    for try await line in ProviderTransport.sseLines(bytes) {
                         try Task.checkCancellation()
                         guard let frame = acc.feed(line) else { continue }
                         try Self.handle(frame, state: &state, continuation: continuation)

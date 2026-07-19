@@ -42,6 +42,37 @@ struct SSEAccumulator {
 /// Shared HTTP+retry front door for streaming providers. Retries transient
 /// failures *before* any bytes are surfaced, so retries are always safe.
 enum ProviderTransport {
+    /// SSE-safe line splitter. `URLSession.AsyncBytes.lines` silently drops
+    /// empty lines — the very thing that delimits SSE frames — so adapters must
+    /// use this instead. Yields every line, empty ones included; handles \n and \r\n.
+    static func sseLines<S: AsyncSequence & Sendable>(
+        _ bytes: S
+    ) -> AsyncThrowingStream<String, Error> where S.Element == UInt8 {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var buffer: [UInt8] = []
+                do {
+                    for try await byte in bytes {
+                        if byte == 0x0A { // \n
+                            if buffer.last == 0x0D { buffer.removeLast() } // \r\n
+                            continuation.yield(String(decoding: buffer, as: UTF8.self))
+                            buffer.removeAll(keepingCapacity: true)
+                        } else {
+                            buffer.append(byte)
+                        }
+                    }
+                    if !buffer.isEmpty {
+                        continuation.yield(String(decoding: buffer, as: UTF8.self))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     static let transientStatuses: Set<Int> = [408, 425, 429, 500, 502, 503, 529]
 
     static func openSSEStream(

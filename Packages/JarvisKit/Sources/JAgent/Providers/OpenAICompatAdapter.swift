@@ -38,7 +38,7 @@ public struct OpenAICompatAdapter: ProviderAdapter {
                     var acc = SSEAccumulator()
                     var state = CompatStreamState()
 
-                    for try await line in bytes.lines {
+                    for try await line in ProviderTransport.sseLines(bytes) {
                         try Task.checkCancellation()
                         guard let frame = acc.feed(line) else { continue }
                         if frame.data == "[DONE]" {

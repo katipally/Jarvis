@@ -49,9 +49,11 @@ public struct AnthropicAdapter: ProviderAdapter {
                     let bytes = try await ProviderTransport.openSSEStream(session: session, request: req)
                     var acc = SSEAccumulator()
                     var state = AnthropicStreamState()
+                    let debugLog = SSEDebugLog() // no-op unless JARVIS_SSE_LOG is set
 
-                    for try await line in bytes.lines {
+                    for try await line in ProviderTransport.sseLines(bytes) {
                         try Task.checkCancellation()
+                        debugLog.write(line)
                         guard let frame = acc.feed(line) else { continue }
                         try Self.handle(frame, state: &state, continuation: continuation)
                     }
@@ -275,4 +277,30 @@ private struct AnthropicStreamState {
     var toolIDByIndex: [Int: String] = [:]
     var thinkingIndexes: Set<Int> = []
     var signatureByIndex: [Int: String] = [:]
+}
+
+/// Raw-wire diagnostics: appends every SSE line to the file named by the
+/// JARVIS_SSE_LOG environment variable. Inert in normal runs.
+final class SSEDebugLog: @unchecked Sendable {
+    private let handle: FileHandle?
+    private let lock = NSLock()
+
+    init() {
+        guard let path = ProcessInfo.processInfo.environment["JARVIS_SSE_LOG"] else {
+            handle = nil
+            return
+        }
+        FileManager.default.createFile(atPath: path, contents: nil)
+        handle = FileHandle(forWritingAtPath: path)
+        _ = try? handle?.seekToEnd()
+    }
+
+    func write(_ line: String) {
+        guard let handle else { return }
+        lock.withLock {
+            try? handle.write(contentsOf: Data((line + "\n").utf8))
+        }
+    }
+
+    deinit { try? handle?.close() }
 }

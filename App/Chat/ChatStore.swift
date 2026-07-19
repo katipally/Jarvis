@@ -176,6 +176,7 @@ final class ChatStore {
 
             var completion: StopReason?
             for await event in loop.run(initial: self.transcript, runID: runID) {
+                ChatDebugLog.write(event)
                 switch event {
                 case .runStarted:
                     break
@@ -423,5 +424,33 @@ final class ChatStore {
     private func mutate(_ id: String, _ change: (inout DisplayMessage) -> Void) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         change(&messages[index])
+    }
+}
+
+/// Event-flow diagnostics: appends one line per AgentEvent to the file named by
+/// JARVIS_CHAT_LOG. Inert in normal runs.
+enum ChatDebugLog {
+    nonisolated(unsafe) private static let handle: FileHandle? = {
+        guard let path = ProcessInfo.processInfo.environment["JARVIS_CHAT_LOG"] else { return nil }
+        FileManager.default.createFile(atPath: path, contents: nil)
+        return FileHandle(forWritingAtPath: path)
+    }()
+
+    static func write(_ event: AgentEvent) {
+        guard let handle else { return }
+        let line: String
+        switch event {
+        case .runStarted: line = "runStarted"
+        case .textDelta(let t): line = "textDelta(\(t.count)ch)"
+        case .thinkingDelta(let t): line = "thinkingDelta(\(t.count)ch)"
+        case .assistantMessage(let m): line = "assistantMessage(plainText=\(m.plainText.count)ch, blocks=\(m.content.count))"
+        case .toolCallStarted(_, let name, _): line = "toolCallStarted(\(name))"
+        case .toolCallFinished(let id, _, let isError): line = "toolCallFinished(\(id), error=\(isError))"
+        case .usage(let u): line = "usage(in=\(u.inputTokens), out=\(u.outputTokens))"
+        case .completed(let r): line = "completed(\(r))"
+        case .aborted: line = "aborted"
+        case .failed(let m): line = "failed(\(m))"
+        }
+        try? handle.write(contentsOf: Data((line + "\n").utf8))
     }
 }

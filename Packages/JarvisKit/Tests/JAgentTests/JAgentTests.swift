@@ -186,3 +186,28 @@ struct FakeAdapter: ProviderAdapter {
     let parsed = JSONValue.parse(string)
     #expect(parsed == original)
 }
+
+/// Regression: SSE frames are delimited by EMPTY lines, which
+/// URLSession.AsyncBytes.lines silently drops. The custom splitter must
+/// preserve them or no frame ever completes mid-stream.
+@Test func sseLineSplitterPreservesEmptyLines() async throws {
+    let wire = "event: content_block_delta\r\ndata: {\"a\":1}\r\n\r\nevent: message_stop\ndata: {}\n\n"
+    let bytes = AsyncStream<UInt8> { continuation in
+        for byte in Array(wire.utf8) { continuation.yield(byte) }
+        continuation.finish()
+    }
+    var lines: [String] = []
+    for try await line in ProviderTransport.sseLines(bytes) {
+        lines.append(line)
+    }
+    #expect(lines == [
+        "event: content_block_delta", "data: {\"a\":1}", "",
+        "event: message_stop", "data: {}", "",
+    ])
+
+    // And the accumulator turns them into two complete frames.
+    var acc = SSEAccumulator()
+    let frames = lines.compactMap { acc.feed($0) }
+    #expect(frames.count == 2)
+    #expect(frames.first?.data == "{\"a\":1}")
+}
