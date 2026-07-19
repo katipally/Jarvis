@@ -49,5 +49,10 @@ targets:
         SWIFT_VERSION: "6.0"
         ENABLE_APP_INTENTS_METADATA_GENERATION: NO
         CODE_SIGN_STYLE: Automatic
+        # Stable signing identity: keeps the app's designated requirement the
+        # same across rebuilds, so Keychain access survives (no re-prompts) and
+        # the data-protection keychain (entitlement-gated, dialog-free) works.
+        DEVELOPMENT_TEAM: A9P2388PHM
+        CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_ENTITLEMENTS: App/Jarvis.entitlements
         INFOPLIST_KEY_CFBundleShortVersionString: "0.1"
