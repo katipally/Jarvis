@@ -13,7 +13,6 @@ enum NotchPresentation: Equatable {
     case open(NotchViewModel.Tab)          // expanded panel
     case listening(VoiceController.Phase)  // voice chrome (listening/processing/review)
     case peek(String)                      // proactive nudge, first line
-    case meeting                           // live-meeting status bar
     case working                           // background-run pulse bar
 }
 
@@ -26,7 +25,7 @@ final class NotchViewModel {
     }
 
     enum Tab: String, CaseIterable, Identifiable, Equatable {
-        case home, history, activity, settings
+        case home, history, profile, settings
 
         var id: String { rawValue }
 
@@ -34,16 +33,16 @@ final class NotchViewModel {
             switch self {
             case .home: "message"
             case .history: "clock.arrow.circlepath"
-            case .activity: "waveform.path.ecg"
+            case .profile: "person.text.rectangle"
             case .settings: "gearshape"
             }
         }
 
         var label: String {
             switch self {
-            case .home: "Home"
+            case .home: "Chat"
             case .history: "History"
-            case .activity: "Activity"
+            case .profile: "Profile"
             case .settings: "Settings"
             }
         }
@@ -109,7 +108,7 @@ final class NotchViewModel {
             return CGSize(width: clamp(w * 0.40, 520, 680), height: clamp(h * 0.34, 240, 400))
         case .settings:
             return CGSize(width: clamp(w * 0.40, 540, 700), height: clamp(h * 0.42, 320, 480))
-        case .activity:
+        case .profile:
             return CGSize(width: clamp(w * 0.56, 620, 960), height: clamp(h * 0.46, 340, 580))
         }
     }
@@ -124,7 +123,6 @@ final class NotchViewModel {
         case .open(let tab): openContentSize(for: tab)
         case .listening(let phase): phase == .review ? listeningReviewSize : listeningSize
         case .peek: listeningSize
-        case .meeting: closedStatusSize
         case .working: workingSize     // two lines: holds the verbose status text
         case .idle: closedNotchSize
         }
@@ -154,12 +152,6 @@ final class NotchViewModel {
     var workingSize: CGSize {
         CGSize(width: clamp(closedNotchSize.width + NotchMetrics.workingExtraWidth, 320, 400),
                height: closedNotchSize.height + NotchMetrics.workingExtraHeight)
-    }
-
-    /// Slim closed-notch status bar (meeting timer, background-run pulse):
-    /// camera-row height only, widened so the flanks can hold an icon + timer.
-    var closedStatusSize: CGSize {
-        CGSize(width: clamp(closedNotchSize.width + NotchMetrics.statusExtraWidth, 300, 360), height: closedNotchSize.height)
     }
 
     /// The window is fixed at the largest a tab can ever need; only the inner

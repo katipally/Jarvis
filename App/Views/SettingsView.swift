@@ -5,74 +5,6 @@ import JScreen
 import JStore
 import SwiftUI
 
-/// Learned preference facets: what the decision engine believes about how the
-/// user likes things, with pin (never decays) / forget (never resurfaces).
-private struct FacetsSection: View {
-    let knowledge: KnowledgeService
-
-    @State private var facets: [FacetRow] = []
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            JarvisSectionHeader(title: "Learned preferences")
-            if facets.isEmpty {
-                Text("Nothing learned yet. Jarvis picks up preferences from what you say (\"I prefer…\", \"never…\") and how you react to its nudges.")
-                    .font(.jarvisFootnote).foregroundStyle(Color.jarvisTextTertiary)
-            } else {
-                ForEach(facets) { facet in
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(facet.value)
-                                .font(.jarvisCaption).foregroundStyle(Color.jarvisTextPrimary)
-                                .lineLimit(2)
-                            Text("\(facet.class) · \(facet.state)\(facet.userState == "pinned" ? " · pinned" : "")")
-                                .font(.jarvisFootnote).foregroundStyle(Color.jarvisTextTertiary)
-                        }
-                        Spacer()
-                        Button {
-                            setUserState(facet, facet.userState == "pinned" ? "auto" : "pinned")
-                        } label: {
-                            Image(systemName: facet.userState == "pinned" ? "pin.fill" : "pin")
-                        }
-                        .buttonStyle(.plain).foregroundStyle(Color.jarvisAccent)
-                        .accessibilityLabel("Pin preference")
-                        Button {
-                            setUserState(facet, "forgotten")
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.plain).foregroundStyle(.white.opacity(0.5))
-                        .accessibilityLabel("Forget preference")
-                    }
-                    .padding(.vertical, 3)
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .task { await reload() }
-    }
-
-    private func reload() async {
-        facets = (try? await knowledge.store.database.reader.read { db in
-            try FacetRow
-                .filter(Column("user_state") != "forgotten")
-                .order(Column("stability").desc)
-                .limit(30)
-                .fetchAll(db)
-        }) ?? []
-    }
-
-    private func setUserState(_ facet: FacetRow, _ state: String) {
-        Task {
-            _ = try? await knowledge.store.database.writer.write { db in
-                try db.execute(sql: "UPDATE facet SET user_state = ? WHERE key = ?",
-                               arguments: [state, facet.key])
-            }
-            await reload()
-        }
-    }
-}
-
 /// Debug transparency for the knowledge core: pipeline counters + a manual
 /// drain trigger.
 private struct KnowledgeSection: View {
@@ -146,13 +78,12 @@ struct SettingsView: View {
     @Bindable var core: JarvisCore
     let screenBuffer: ScreenBuffer
     var knowledge: KnowledgeService?
+    var worlds: WorldSyncEngine?
 
     @State private var modelsByAccount: [String: [ProviderModel]] = [:]
     @State private var loadingModels: Set<String> = []
     @State private var showAddProvider = false
     @State private var pendingDelete: ProviderAccount?
-    @State private var meetingsEnabled = false
-    @State private var meetingsSaveError: String?
 
     private static let sessionGapChoices = [2, 5, 10, 15, 30, 60]
 
@@ -163,12 +94,14 @@ struct SettingsView: View {
                 rolesSection
                 sessionsSection
                 privacySection
+                if let knowledge, let worlds {
+                    JarvisSectionHeader(title: "Sources").padding(.horizontal, 16)
+                    SourcesPane(knowledge: knowledge, engine: worlds)
+                }
                 ProactivitySettings(settings: core.settings)
                 ScreenRewindSection(settings: core.settings, screenBuffer: screenBuffer)
-                meetingsSection
                 if let knowledge {
                     KnowledgeSection(knowledge: knowledge)
-                    FacetsSection(knowledge: knowledge)
                 }
                 PermissionsDashboard()
             }
@@ -414,53 +347,6 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.08)))
-    }
-
-    // MARK: - Meetings (opt-in)
-
-    private var meetingsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            JarvisSectionHeader(title: "Meetings")
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Transcribe meetings")
-                        .font(.jarvisBody)
-                        .foregroundStyle(.white.opacity(0.85))
-                    Text("When a call app (Zoom, Teams, FaceTime, Webex, Slack, Discord) comes to the front, Jarvis records an on-device transcript and summarizes it when the call ends. Needs Screen Recording permission (that is what grants system-audio capture).")
-                        .font(.jarvisFootnote)
-                        .foregroundStyle(.white.opacity(0.55))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { meetingsEnabled },
-                    set: { newValue in
-                        meetingsEnabled = newValue
-                        Task {
-                            do {
-                                try await core.settings.set(MeetingService.settingKey, to: newValue)
-                                meetingsSaveError = nil
-                            } catch {
-                                meetingsSaveError = "Couldn't save — \(error.localizedDescription)"
-                            }
-                        }
-                    }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(Color.jarvisAccent)
-            }
-            .padding(14)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.jarvisSurface))
-
-            if let meetingsSaveError {
-                Label(meetingsSaveError, systemImage: "exclamationmark.triangle.fill")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.jarvisFootnote)
-                    .foregroundStyle(Color.jarvisError)
-            }
-        }
-        .task { meetingsEnabled = ((try? await core.settings.get(MeetingService.settingKey, as: Bool.self)) ?? nil) ?? false }
     }
 
     private func emptyCard(_ text: String) -> some View {
@@ -720,7 +606,7 @@ private struct ScreenRewindSection: View {
     @State private var thumbnails: [String] = []
     @State private var confirmPurge = false
 
-    private static let retentionChoices = [24, 72, 168]
+    private static let retentionChoices = [2, 5, 12]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -837,7 +723,7 @@ private struct ScreenRewindSection: View {
     }
 
     private func label(forHours hours: Int) -> String {
-        switch hours { case 24: "1 day"; case 168: "1 week"; default: "3 days" }
+        switch hours { case 2: "2 hours"; case 12: "12 hours"; default: "5 hours" }
     }
 
     private func commitExcluded() {

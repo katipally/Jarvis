@@ -293,8 +293,22 @@ struct GraphView: View {
         return Set(snapshot.nodes.filter { $0.name.localizedCaseInsensitiveContains(q) }.map(\.id))
     }
 
+    /// The selected node plus its direct neighbors — everything else fades so a
+    /// dense graph stays readable while inspecting one entity. Nil when nothing
+    /// is selected (full graph shown).
+    private var neighborhood: Set<String>? {
+        guard let selected else { return nil }
+        var ids: Set<String> = [selected]
+        for edge in snapshot.edges {
+            if edge.source == selected { ids.insert(edge.target) }
+            if edge.target == selected { ids.insert(edge.source) }
+        }
+        return ids
+    }
+
     private func drawEdges(_ context: GraphicsContext, size: CGSize) {
         let searching = !matchedIDs.isEmpty || !query.trimmingCharacters(in: .whitespaces).isEmpty
+        let focused = neighborhood != nil
         for edge in snapshot.edges {
             guard let wa = positions[edge.source], let wb = positions[edge.target] else { continue }
             let a = screenPoint(wa, in: size), b = screenPoint(wb, in: size)
@@ -304,6 +318,7 @@ struct GraphView: View {
             path.addLine(to: b)
             var opacity = edge.isCurrent ? (highlighted ? 0.7 : 0.22) : 0.1
             if searching, !highlighted { opacity *= 0.4 }
+            if focused, !highlighted { opacity *= 0.25 }   // fade edges away from the focused node
             context.stroke(path, with: .color(.white.opacity(opacity)), lineWidth: highlighted ? 1.5 : 0.8)
 
             if highlighted {
@@ -320,6 +335,7 @@ struct GraphView: View {
     private func drawNodes(_ context: GraphicsContext, size: CGSize) {
         let matches = matchedIDs
         let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        let focus = neighborhood
         for node in snapshot.nodes {
             guard let world = positions[node.id] else { continue }
             let p = screenPoint(world, in: size)
@@ -327,7 +343,9 @@ struct GraphView: View {
             guard p.x > -40, p.x < size.width + 40, p.y > -40, p.y < size.height + 40 else { continue }
             let isSelected = selected == node.id
             let isMatch = matches.contains(node.id)
-            let dimmed = searching && !isMatch && !isSelected
+            // Dim if a search excludes it, or a focused node's neighborhood does.
+            let dimmed = (searching && !isMatch && !isSelected)
+                || (focus.map { !$0.contains(node.id) } ?? false)
             let radius: CGFloat = (isSelected ? 7 : 5) * min(zoom, 1.6)
             let color = kindColor(node.kind).opacity(node.isCurrent ? 1 : 0.4)
             context.fill(Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)),
