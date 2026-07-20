@@ -14,8 +14,13 @@ public enum MemoryExtractor {
     }
     Rules: capture only lasting, user-specific information (facts about the user, \
     their preferences, ongoing projects, commitments) — never generic knowledge or \
-    one-off chit-chat. Keep each memory a single concise sentence. Use canonical \
-    entity names. If nothing is worth remembering, return empty arrays.
+    one-off chit-chat. Each memory is one concise THIRD-PERSON sentence ("User \
+    prefers dark roast coffee") that will still be true weeks from now — never a \
+    quote of what the user typed. NEVER extract greetings or mic tests ("hello", \
+    "can you hear me"), questions the user asked, the fact that the user is talking \
+    to an assistant, or transient machine state (open files, git status, what's on \
+    screen). Use canonical entity names. Most conversations contain nothing worth \
+    remembering — empty arrays are the normal result.
     """
 
     public static func userPrompt(conversation: String) -> String {

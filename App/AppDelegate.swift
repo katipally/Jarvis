@@ -93,7 +93,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 database: database, localFirst: localFirst, taskStore: taskStore,
                 settings: core.settings,
                 receiveProactive: { body in chat.receiveProactive(body) },
-                ingestFact: { fact in await memoryService.remember(fact) })
+                ingestFact: { fact in
+                    // Meeting key facts are model-generated, so they clear the
+                    // same durability gate as extraction (explicit `remember`
+                    // commands don't — a direct user instruction always wins).
+                    guard MemoryValidator.isDurable(fact) else { return }
+                    await memoryService.remember(fact)
+                })
             self.meetings = meetings
 
             screenManager.start(core: core, chat: chat, voice: voice, meetings: meetings)

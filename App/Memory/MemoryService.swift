@@ -56,10 +56,15 @@ final class MemoryService {
         }
     }
 
-    /// At launch: re-embed anything missing a current-model vector, then resume
-    /// extraction for user messages a previous run never processed.
+    /// At launch: re-embed anything missing a current-model vector, archive any
+    /// stored memories that fail the durability validator (junk saved before
+    /// the filter existed — archived, not deleted, so it's recoverable), then
+    /// resume extraction for user messages a previous run never processed.
     func bootSweep() async {
         await store.reembedMissing()
+        for item in await store.list() where !MemoryValidator.isDurable(item.text) {
+            await store.archive(id: item.id)
+        }
         await runExtraction()
     }
 
@@ -113,7 +118,7 @@ final class MemoryService {
                 LocalExtraction.self, instructions: Self.extractionInstructions,
                 prompt: Self.extractionPrompt(chunk)
             ) {
-                await ingest(extraction, segmentID: segmentID)
+                await ingest(extraction, segmentID: segmentID, source: chunk)
                 produced = true
             } else {
                 anyFailed = true
@@ -138,21 +143,28 @@ final class MemoryService {
             if case .failed = event { failed = true }
         }
         guard !failed else { return false }
-        await store.ingest(MemoryExtractor.parse(response), segmentID: segmentID)
+        var parsed = MemoryExtractor.parse(response)
+        // Model-extracted memories must clear the durability gate on this path too.
+        parsed.memories = parsed.memories.filter { MemoryValidator.isDurable($0.text, source: conversation) }
+        parsed.entities = parsed.entities.filter { MemoryValidator.isRealEntity($0.name) }
+        await store.ingest(parsed, segmentID: segmentID)
         return true
     }
 
-    /// Map an on-device extraction into the store + task tables.
-    private func ingest(_ extraction: LocalExtraction, segmentID: String?) async {
+    /// Map an on-device extraction into the store + task tables. `source` is the
+    /// conversation the extraction came from — memories that fail the durability
+    /// validator (chit-chat echoes, meta observations, transient state) are
+    /// dropped here, before they ever reach the store.
+    private func ingest(_ extraction: LocalExtraction, segmentID: String?, source: String? = nil) async {
         let result = ExtractionResult(
             memories: extraction.memories.compactMap { m in
                 let t = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !t.isEmpty else { return nil }
+                guard !t.isEmpty, MemoryValidator.isDurable(t, source: source) else { return nil }
                 return ExtractedMemory(kind: MemoryKind(rawValue: m.kind.lowercased()) ?? .fact, text: t)
             },
             entities: extraction.entities.compactMap { e in
                 let n = e.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !n.isEmpty else { return nil }
+                guard !n.isEmpty, MemoryValidator.isRealEntity(n) else { return nil }
                 return ExtractedEntity(name: n, kind: e.kind.lowercased())
             },
             relations: extraction.relations.compactMap { r in
@@ -299,10 +311,14 @@ final class MemoryService {
 
     private static let extractionInstructions = """
     You extract durable, user-specific memory from the user's own messages for a \
-    personal assistant. Capture only lasting facts about the user, their preferences, \
-    ongoing projects, the entities they mention, relations involving them, commitments \
-    they make, and concrete action items. Ignore chit-chat and generic world knowledge. \
-    If nothing is worth keeping, return empty arrays.
+    personal assistant. A memory must be (1) a lasting fact that will still be true \
+    and useful weeks from now, (2) written in third person ("User prefers dark roast \
+    coffee"), (3) a distillation — never a quote or restatement of what the user typed. \
+    NEVER extract: greetings or mic tests ("hello", "can you hear me"), questions the \
+    user asked, the fact that the user is talking to an assistant, transient machine \
+    state (open files, git status, what's on screen), or anything about this \
+    conversation itself. Most messages contain nothing worth keeping — empty arrays \
+    are the normal result.
     """
 
     private static func extractionPrompt(_ text: String) -> String {

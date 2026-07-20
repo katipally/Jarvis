@@ -7,7 +7,7 @@ import FoundationModels
 
 @Generable
 public struct LocalMemory: Sendable {
-    @Guide(description: "A lasting, user-specific fact worth remembering. Timeless, no dates. Under 15 words.")
+    @Guide(description: "A lasting, user-specific fact in third person, e.g. 'User prefers dark roast coffee'. Timeless, under 15 words. Never a greeting, question, quote of the user's words, or transient machine state.")
     public var text: String
     @Guide(description: "One of: fact, preference, event, task, insight")
     public var kind: String
@@ -42,7 +42,7 @@ public struct LocalCommitment: Sendable {
 /// One structured extraction over a slice of conversation (or one sentence).
 @Generable
 public struct LocalExtraction: Sendable {
-    @Guide(description: "Lasting facts about the user. Empty if the text is just chit-chat.")
+    @Guide(description: "Lasting third-person facts about the user. Empty is the normal result — greetings, questions, tests, and transient state yield no memories.")
     public var memories: [LocalMemory]
     @Guide(description: "Named entities mentioned. Empty if none.")
     public var entities: [LocalEntity]
