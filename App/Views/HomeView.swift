@@ -40,20 +40,14 @@ struct HomeView: View {
         chat.messages.filter { !($0.isError && $0.text == chat.errorText) }
     }
 
-    /// The latest exchange currently "in focus": the last user message together
-    /// with everything after it (its answer + tool rows). Including the user's
-    /// message keeps the question visible above its answer instead of vanishing.
-    /// Everything before it lives above the fold (scroll up to see).
+    /// Rows AFTER the last user message: the latest AI response, pinned alone in
+    /// focus. The user's prompt and all earlier history live above the fold
+    /// (scroll up to see) — "focus" means only the answer is on screen.
     private var answerStartIndex: Int? {
         guard !visibleMessages.isEmpty else { return nil }
         guard let lastUser = visibleMessages.lastIndex(where: { $0.role == .user }) else { return 0 }
-        return lastUser
-    }
-
-    /// The focused exchange has produced assistant content (answer or a tool
-    /// row), not just the user's message still awaiting a reply.
-    private var focusHasReply: Bool {
-        answerMessages.contains { $0.role != .user }
+        let start = lastUser + 1
+        return start < visibleMessages.count ? start : nil
     }
 
     private var priorMessages: ArraySlice<DisplayMessage> {
@@ -68,7 +62,7 @@ struct HomeView: View {
     private func reportBodyHeight() {
         // Waiting for the first token of a new answer: hold the current size
         // instead of collapsing and re-growing.
-        if chat.phase == .responding, !focusHasReply { return }
+        if chat.phase == .responding, answerMessages.isEmpty { return }
         let content = answerMessages.isEmpty ? greetingBaseHeight : answerHeight
         // Allowance = bottom padding (10) + a slice of the 14pt gap above the
         // answer. Must stay ≤ 24 or the previous bubble's bottom edge leaks
@@ -179,12 +173,6 @@ struct HomeView: View {
                     onBrowsingChange(false)
                     suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
                     withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
-                } else if scrollMode == .pinned {
-                    // Answer finished: present the exchange from its top so the
-                    // latest response is read from the start (and short answers
-                    // sit at the top of the card, not pushed to the bottom).
-                    suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
-                    withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .top) }
                 }
             }
             // One-way state machine: scrolling up enters browsing; NOTHING the
@@ -205,7 +193,7 @@ struct HomeView: View {
                         scrollMode = .pinned
                         onBrowsingChange(false)
                         suppressGeometryUntil = Date.now.addingTimeInterval(0.6)
-                        withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .top) }
+                        withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
                     }
                     return
                 }
@@ -227,10 +215,7 @@ struct HomeView: View {
                               lastDistanceFromBottom > 6 else { return }
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
-                        // Follow the bottom while streaming; hold the top once
-                        // settled so the focused answer stays framed from its start.
-                        let anchor: UnitPoint = chat.phase == .responding ? .bottom : .top
-                        withTransaction(transaction) { proxy.scrollTo("live-bottom", anchor: anchor) }
+                        withTransaction(transaction) { proxy.scrollTo("live-bottom", anchor: .bottom) }
                     }
                 }
             }
@@ -240,7 +225,7 @@ struct HomeView: View {
                 scrollMode = .pinned
                 onBrowsingChange(false)
                 suppressGeometryUntil = Date.now.addingTimeInterval(0.6)
-                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .top) }
+                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
             }
         }
         .defaultScrollAnchor(.bottom)

@@ -14,24 +14,28 @@ struct ListeningView: View {
             // Top row is exactly the camera height; the waveform + mic flank the
             // reserved camera cutout so nothing renders behind it.
             HStack(spacing: 0) {
+                // Waveform hugs the RIGHT of its flank, i.e. tight to the camera's
+                // left edge.
                 Waveform(level: voice.level, active: voice.phase == .listening)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.trailing, 8)
                     .accessibilityHidden(true)
                     .morphAnchor(MorphID.leftFlank, in: morphNamespace, active: !reduceMotion)
                 Color.clear.frame(width: cameraWidth + NotchMetrics.cameraSideReserve)
                     .morphAnchor(MorphID.camera, in: morphNamespace, active: !reduceMotion)
+                // Mic hugs the LEFT of its flank, i.e. tight to the camera's right edge.
                 Group {
                     if voice.phase == .processing {
                         ProgressView().controlSize(.mini)
                     } else {
                         Image(systemName: "mic.fill")
-                            .font(.system(size: 9))
+                            .font(.system(size: 10))
                             .foregroundStyle(.white.opacity(0.85))
                             .symbolEffect(.pulse, isActive: voice.phase == .listening)
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 10)
                 .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
             }
             .frame(height: cameraHeight)
@@ -101,7 +105,7 @@ private struct Waveform: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let barCount = 9
+    private let barCount = 6
 
     var body: some View {
         if reduceMotion {

@@ -21,16 +21,15 @@ enum NotchMetrics {
     static let headerCameraReserve: CGFloat = 28
     /// Width added to the closed notch for the slim status bar (meeting).
     static let statusExtraWidth: CGFloat = 150
-    /// Width/height added to the closed notch for the listening chrome. Kept
-    /// minimal — just enough for the small waveform + a short transcript line;
-    /// longer transcripts scroll/truncate at the head.
-    static let listeningExtraWidth: CGFloat = 50
+    /// Width/height added to the closed notch for the listening chrome. Just
+    /// enough for a small waveform hugging the left of the camera and a mic
+    /// hugging the right, plus a one-line transcript below.
+    static let listeningExtraWidth: CGFloat = 100
     static let listeningExtraHeight: CGFloat = 26
-    /// The compact foreground/background "working" bar: a touch wider than
-    /// listening and two lines tall so the verbose status ("Searching the web:
-    /// …") fits without truncating mid-word.
-    static let workingExtraWidth: CGFloat = 170
-    static let workingExtraHeight: CGFloat = 44
+    /// The compact "working" bar: a touch wider than closed and only tall enough
+    /// for two lines of status below the camera ("Searching the web: …").
+    static let workingExtraWidth: CGFloat = 160
+    static let workingExtraHeight: CGFloat = 32
     /// Extra height for the dictation-review state (transcript + send/cancel).
     static let reviewExtraHeight: CGFloat = 96
     /// Slack around the content so the fixed window can hold the glow bleed + shadow.
@@ -40,8 +39,10 @@ enum NotchMetrics {
     /// edge and the tray, and the tray's own height. The window reserves both so
     /// a max-height answer plus the tray still fits inside the fixed panel.
     static let trayGap: CGFloat = 10
-    static let trayHeight: CGFloat = 46
-    static let trayReserve: CGFloat = 10 + 46 + 12 // gap + height + breathing room
+    /// Hit-region + reserve height for the tray. Tall enough to hold the
+    /// composer grown to its 3-line maximum (it grows downward from the body).
+    static let trayHeight: CGFloat = 84
+    static let trayReserve: CGFloat = 10 + 84 + 16 // gap + height + breathing room
     /// Corner radii: (top, bottom) for the closed notch and the open panel.
     static let cornerClosed: (top: CGFloat, bottom: CGFloat) = (6, 14)
     static let cornerOpen: (top: CGFloat, bottom: CGFloat) = (20, 26)

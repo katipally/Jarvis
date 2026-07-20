@@ -90,10 +90,10 @@ final class NotchViewModel {
     /// Home chrome above/below the body (header row + content paddings).
     private var homeChromeHeight: CGFloat { closedNotchSize.height + 8 + 16 }
 
-    /// Comfortable focus floor: a one-line answer still gets a roomy card, not a
-    /// sliver. The focused answer is top-aligned within it, so short replies read
-    /// cleanly and "Back to latest" always re-frames to at least this.
-    var homeMinHeight: CGFloat { clamp(screenFrame.height * 0.15, 180, 240) }
+    /// Low floor: focus pins ONLY the latest answer and the notch fits it
+    /// tightly, so a one-line answer gives a compact panel rather than a tall
+    /// empty one. The greeting reports its own comfortable height instead.
+    var homeMinHeight: CGFloat { clamp(screenFrame.height * 0.12, 120, 150) }
     var homeMaxHeight: CGFloat { screenFrame.height * 0.5 }
     /// While the user reads history the panel opens up to at least 30% of the
     /// screen — short answers shouldn't force reading through a slot.
@@ -148,7 +148,7 @@ final class NotchViewModel {
     /// Compact size shown while listening: waveform flanks the camera on the top
     /// row, the transcript sits on one line BELOW the camera cutout.
     var listeningSize: CGSize {
-        CGSize(width: clamp(closedNotchSize.width + NotchMetrics.listeningExtraWidth, 235, 320),
+        CGSize(width: clamp(closedNotchSize.width + NotchMetrics.listeningExtraWidth, 280, 360),
                height: closedNotchSize.height + NotchMetrics.listeningExtraHeight)
     }
 

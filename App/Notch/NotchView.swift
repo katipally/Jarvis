@@ -370,8 +370,10 @@ struct NotchView: View {
         .onChange(of: chat?.isWorkingCompact ?? false) { _, compact in
             // The compact working bar just handed off to the answer: if the run
             // began while the notch was closed (voice / push-to-talk), open the
-            // panel so the streaming answer is shown, focused.
-            guard !compact, chat?.phase == .responding, vm.state == .closed, isPrimary else { return }
+            // panel so the streaming answer is shown, focused — regardless of
+            // where the pointer is.
+            guard !compact, chat?.phase == .responding, vm.state == .closed,
+                  isPrimary || isVoiceHost else { return }
             vm.selectedTab = .home
             withAnimation(openAnimation) { vm.open() }
         }

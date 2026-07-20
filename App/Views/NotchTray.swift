@@ -58,7 +58,8 @@ struct NotchTray: View {
             .lineLimit(1...3) // grows to 3 lines, then the text scrolls inside
             .focused($inputFocused)
             .onChange(of: chat.input) { chat.draftChanged() }
-            .onSubmit(send)
+            // Return sends; Shift+Return inserts a newline (the field grows).
+            // No .onSubmit — it would also fire on Shift+Return and send.
             .onKeyPress(.return) {
                 if NSEvent.modifierFlags.contains(.shift) { return .ignored }
                 send()
