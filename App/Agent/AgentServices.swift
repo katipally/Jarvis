@@ -1,7 +1,7 @@
 import Foundation
 import JAgent
 import JControl
-import JMemory
+import JKnowledge
 import JProactive
 import JScreen
 import JStore
@@ -19,11 +19,10 @@ final class AgentServices {
     let control: ComputerUseRuntime
     let screenBuffer: ScreenBuffer
     let screenRecall: ScreenRecall
-    let funnel: NudgeFunnel
     let cronStore: CronStore
 
-    init(database: JarvisDatabase, supportDirectory: URL, memoryStore: JMemory.MemoryStore,
-         memoryService: MemoryService? = nil) {
+    init(database: JarvisDatabase, supportDirectory: URL, knowledgeStore: KnowledgeStore,
+         knowledge: KnowledgeService? = nil) {
         let artifactsDir = supportDirectory.appendingPathComponent("artifacts", isDirectory: true)
         let scratchDir = supportDirectory.appendingPathComponent("scratch", isDirectory: true)
         let framesDir = supportDirectory.appendingPathComponent("frames", isDirectory: true)
@@ -42,7 +41,6 @@ final class AgentServices {
         self.control = control
         self.screenBuffer = screenBuffer
         self.screenRecall = screenRecall
-        self.funnel = NudgeFunnel(database: database)
         let cronStore = CronStore(database: database)
         self.cronStore = cronStore
         self.gate = ApprovalGate(store: approvalStore) { request in
@@ -56,7 +54,7 @@ final class AgentServices {
                 + BridgeTools.registry()
                 + ScreenTools.registry(recall: screenRecall, buffer: screenBuffer)
                 + ProactiveTools.registry(cronStore: cronStore)
-                + MemoryTools.registry(store: memoryStore, memory: memoryService)
+                + MemoryTools.registry(store: knowledgeStore, knowledge: knowledge)
         )
 
         presenter.gate = gate

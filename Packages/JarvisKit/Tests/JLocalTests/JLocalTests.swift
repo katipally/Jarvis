@@ -28,6 +28,6 @@ import Testing
     let model = LocalModel()
     guard await model.isAvailable == false else { return } // skip where AI is on
     await #expect(throws: LocalModelError.self) {
-        _ = try await model.generate(NudgeGate.self, instructions: "decide", prompt: "hi")
+        _ = try await model.generate(LocalTriage.self, instructions: "decide", prompt: "hi")
     }
 }

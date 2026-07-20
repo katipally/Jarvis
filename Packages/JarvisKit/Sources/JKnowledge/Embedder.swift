@@ -7,7 +7,7 @@ import Foundation
 /// per-token vectors, then unit-normalizing so cosine similarity is a dot product.
 /// The model is loaded lazily on first use (loading is expensive) and its assets
 /// are downloaded over-the-air, so when they aren't present `embed()` returns nil
-/// and retrieval degrades to FTS-only (handled in MemoryStore).
+/// and retrieval degrades to FTS-only (handled in KnowledgeStore).
 public struct Embedder: @unchecked Sendable {
     public let modelID: String
     private let model: Model?
@@ -15,7 +15,7 @@ public struct Embedder: @unchecked Sendable {
     public init(language: NLLanguage = .english) {
         self.model = NLContextualEmbedding(language: language).map { Model(embedding: $0, language: language) }
         // Bumped from the old NLEmbedding id so a boot re-embed replaces the
-        // old (differently-dimensioned) vectors — see MemoryStore.reembedMissing().
+        // old (differently-dimensioned) vectors — see KnowledgeStore.reembedMissing().
         self.modelID = "nl-contextual-v1"
     }
 

@@ -268,8 +268,7 @@ actor SessionManager {
     }
 
     private static func previewText(_ json: String) -> String {
-        decodeContent(json).compactMap { if case .text(let t) = $0 { return t } else { return nil } }
-            .joined().prefix(80).description
+        plainText(json).prefix(80).description
     }
 }
 
@@ -290,4 +289,13 @@ func decodeContent(_ json: String) -> [ContentBlock] {
     guard let data = json.data(using: .utf8),
           let blocks = try? contentDecoder.decode([ContentBlock].self, from: data) else { return [] }
     return blocks
+}
+
+/// All prose in a stored message's content JSON, flattened. The one place
+/// that decides which block kinds count as text — previews, extraction, and
+/// bootstrap must all see the same words.
+func plainText(_ json: String) -> String {
+    decodeContent(json)
+        .compactMap { if case .text(let t) = $0 { t } else { nil } }
+        .joined()
 }

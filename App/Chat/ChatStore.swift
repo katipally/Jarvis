@@ -1,6 +1,6 @@
 import AppKit
 import JAgent
-import JMemory
+import JKnowledge
 import JStore
 import Observation
 
@@ -85,8 +85,13 @@ final class ChatStore {
     let sessions: SessionManager
     let agent: AgentServices
     /// Set after construction; injects recalled memory into each turn's system prompt.
-    var memory: MemoryService?
+    var memory: KnowledgeService?
     var graphReader: GraphReader?
+    /// World-sync engine, surfaced so Settings can render the Sources section.
+    var worlds: WorldSyncEngine?
+    /// Rendered Active-facet lines ("how the user likes things"), maintained by
+    /// ConsciousnessService after each rebuild; rides in the per-turn context.
+    var facets: String?
 
     var messages: [DisplayMessage] = []
     var attachments: [Attachment] = []
@@ -243,7 +248,7 @@ final class ChatStore {
             // in the user turn so the system prompt stays byte-stable for caching.
             let memoryContext = await memory?.context(for: userText)
             let userMessage = NeutralMessage.user(
-                Self.contextBlock(memory: memoryContext) + "\n\n" + userText,
+                Self.contextBlock(memory: memoryContext, facets: self?.facets) + "\n\n" + userText,
                 images: images
             )
             guard let self else { return }
@@ -388,7 +393,7 @@ final class ChatStore {
         return f
     }()
 
-    private static func contextBlock(memory: String?) -> String {
+    private static func contextBlock(memory: String?, facets: String? = nil) -> String {
         var lines = ["<context>"]
         lines.append("Now: \(contextDateFormatter.string(from: .now)) (\(TimeZone.current.identifier))")
         if let app = NSWorkspace.shared.frontmostApplication?.localizedName {
@@ -396,6 +401,9 @@ final class ChatStore {
         }
         if let memory, !memory.isEmpty {
             lines.append(memory)
+        }
+        if let facets, !facets.isEmpty {
+            lines.append(facets)
         }
         lines.append("</context>")
         return lines.joined(separator: "\n")
