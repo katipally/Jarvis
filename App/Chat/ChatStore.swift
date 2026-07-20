@@ -346,7 +346,9 @@ final class ChatStore {
         Task { @MainActor [weak self] in
             await sessions.resumeSegment(segmentID)
             let stored = await sessions.messages(inSegment: segmentID)
-            guard let self else { return }
+            // Re-check after the suspensions: a send() started meanwhile owns
+            // messages/transcript — clobbering them mid-run corrupts the run.
+            guard let self, self.phase == .idle else { return }
             self.messages = DisplayMessage.rows(from: stored)
             // Rebuild the model-facing transcript from the persisted blocks so
             // the model actually has the conversation, not just the pixels.
@@ -355,7 +357,15 @@ final class ChatStore {
             self.hasOlderHistory = true
             self.errorText = nil
             self.activeAssistantID = nil
+            // "Try again" must never re-send a prompt from the previous
+            // conversation into this one.
+            self.lastUserText = nil
         }
+    }
+
+    /// Whether "Try again" can actually do something right now.
+    var canRetry: Bool {
+        phase == .idle && !(lastUserText ?? "").isEmpty
     }
 
     /// Re-send the last user message (retry affordance after a failure).

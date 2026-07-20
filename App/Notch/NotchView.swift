@@ -238,6 +238,10 @@ struct NotchView: View {
             if newState == .open {
                 peekDismiss?.cancel()
                 peekText = nil
+                // The panel opening unmounts the review UI — a review left
+                // armed with no visible surface would hijack composer ⏎, so
+                // park the transcript in the composer instead.
+                voice?.abandonReview()
             }
         }
     }
@@ -318,6 +322,10 @@ struct NotchView: View {
     private func handleHover(_ hovering: Bool) {
         withAnimation(.smooth) { isHovering = hovering }
         if hovering {
+            // While the voice chrome owns the bar (listening/review), hovering
+            // must not auto-open the panel — opening unmounts the review UI
+            // right as the user aims for its Send/Cancel buttons.
+            if showsListening { return }
             vm.hoverEntered()
         } else {
             vm.hoverExited()

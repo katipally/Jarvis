@@ -22,10 +22,10 @@ final class PushToTalkMonitor {
 
     func start() {
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
-            MainActor.assumeIsolated { self?.handle(event) }
+            MainActor.assumeIsolated { self?.handle(event, isLocal: false) }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
-            MainActor.assumeIsolated { self?.handle(event) }
+            MainActor.assumeIsolated { self?.handle(event, isLocal: true) }
             return event
         }
     }
@@ -37,7 +37,7 @@ final class PushToTalkMonitor {
         holdTask?.cancel()
     }
 
-    private func handle(_ event: NSEvent) {
+    private func handle(_ event: NSEvent, isLocal: Bool) {
         switch event.type {
         case .flagsChanged:
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -52,10 +52,13 @@ final class PushToTalkMonitor {
             if voice.phase == .listening, event.keyCode == Self.escKeyCode {
                 voice.cancel()
                 isHolding = false
-            } else if voice.phase == .review, event.keyCode == Self.returnKeyCode {
-                voice.confirmSend() // review state: ⏎ sends…
-            } else if voice.phase == .review, event.keyCode == Self.escKeyCode {
-                voice.cancel() // …Esc discards
+            } else if isLocal, voice.phase == .review, event.keyCode == Self.returnKeyCode {
+                // Review ⏎/Esc are LOCAL-only: the global monitor fires for
+                // keystrokes typed into OTHER apps, and review has no natural
+                // end — a Return meant for Slack must never fire the dictation.
+                voice.confirmSend()
+            } else if isLocal, voice.phase == .review, event.keyCode == Self.escKeyCode {
+                voice.cancel()
             } else if holdTask != nil {
                 cancelHold() // A different key during the hold aborts it.
             }

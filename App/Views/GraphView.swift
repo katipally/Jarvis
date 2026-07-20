@@ -237,12 +237,14 @@ struct GraphView: View {
     }
 
     private func loadRelated(_ id: String?) async {
+        relatedMemories = []
         guard let id, let memoryStore,
-              let node = snapshot.nodes.first(where: { $0.id == id }) else {
-            relatedMemories = []
-            return
-        }
-        relatedMemories = await memoryStore.retrieve(query: node.name, limit: 2)
+              let node = snapshot.nodes.first(where: { $0.id == id }) else { return }
+        let result = await memoryStore.retrieve(query: node.name, limit: 2)
+        // A slow fetch for a previously selected node must not land under the
+        // node the user has since selected.
+        guard selected == id else { return }
+        relatedMemories = result
     }
 
     /// Tiny kind→color key so the node colors are decodable at a glance.

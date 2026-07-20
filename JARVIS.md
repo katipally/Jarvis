@@ -59,7 +59,7 @@ Anthropic-compatible endpoint, models.dev, Swift 6.3).
 | **Proactivity** | Context switch → one frame → aux model "worth interrupting?" → funnel (cooldown → dedup → deliver) → notch glow nudge. Plus heartbeat + cron + agent-initiated conversations. Daily token budget hard-stop. |
 | **Permissions** | Risk-tiered gate: read-only tools auto-run; external-effect tools prompt **Approve / Always / Deny** in the notch, fail-closed on timeout/dismiss; persistent per-tool+scope rules; **background/proactive runs are locked to the read-only registry** so autonomy can't deadlock or act unattended. |
 | **Providers** | Anthropic (Messages + thinking), OpenAI (**Responses API** — needed for reasoning-effort + tools), MiniMax (Anthropic-compatible). **Neutral: no default model.** Per-role settings (Brain / Aux / Embeddings). Live model lists from `/v1/models` + capability metadata from `models.dev/api.json`. Reasoning-effort control shown only when the model supports it. |
-| **UI** | Notch on all displays, expands under the mouse, sized proportionally per screen. Tabs beside the camera: **Home/Chat** (also the drag-drop shelf), **History**, **Activity** (larger expand; segmented control: Runs · Graph · Artifacts · Decisions), **Settings**. Apple-Intelligence gradient glow. |
+| **UI** | Notch on all displays, expands under the mouse, sized proportionally per screen. Tabs beside the camera: **Home/Chat** (also the drag-drop shelf), **History**, **Activity** (larger expand; segmented control: Timeline · Memory · Tasks — Timeline is one live feed of runs/meetings/nudges/approvals/artifacts; the knowledge graph lives inside Memory), **Settings** (incl. the Screen Rewind transparency card). Apple-Intelligence gradient glow. |
 | **Onboarding** | In-notch, no login: welcome → provider key + model → mic/speech permission → done. AX / Screen-Recording / Automation prompted just-in-time; live permissions dashboard in Settings. |
 
 ---
@@ -186,9 +186,11 @@ These are the course-corrections you gave during the build, folded into the desi
   read. Use the AppleIntelligenceForSwiftUI glow style.
 
 **Activity tab**
-- One Activity panel with a **segmented control** (Runs · Graph · Artifacts · Decisions) that
-  expands the notch bigger. The **shelf is the main chat view** itself — drag files in, they
-  sit there as chips; use them as context or drag them back out.
+- One Activity panel with a **segmented control** (Timeline · Memory · Tasks) that expands the
+  notch bigger. Timeline is a single live chronological feed (runs, meetings, nudges — delivered
+  and held back — approval decisions, artifacts); Memory holds the list ⇄ graph explorer. The
+  **shelf is the main chat view** itself — drag files in, they sit there as chips; use them as
+  context or drag them back out.
 
 **UI / UX polish (several rounds)**
 1. Content must fit inside the notch borders and **scroll when it overflows** — nothing

@@ -25,6 +25,7 @@ final class VoiceController {
     private var engine: (any TranscriberEngine)?
     private var eventsTask: Task<Void, Never>?
     private var readyResetTask: Task<Void, Never>?
+    private var reviewTimeoutTask: Task<Void, Never>?
 
     init(chat: ChatStore, makeEngine: @escaping @Sendable () -> any TranscriberEngine = { SpeechAnalyzerEngine() }) {
         self.chat = chat
@@ -84,6 +85,14 @@ final class VoiceController {
                 self.finalized = text
                 self.partial = ""
                 self.phase = .review
+                // A forgotten review must not linger armed forever — after 30s
+                // the transcript lands in the composer as a draft instead.
+                self.reviewTimeoutTask?.cancel()
+                self.reviewTimeoutTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(30))
+                    guard !Task.isCancelled else { return }
+                    self?.abandonReview()
+                }
             }
         }
     }
@@ -91,14 +100,34 @@ final class VoiceController {
     /// Confirms the reviewed transcript and sends it.
     func confirmSend() {
         guard phase == .review else { return }
+        reviewTimeoutTask?.cancel()
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { phase = .idle; return }
+        // If a run is already streaming, send() would silently no-op — park the
+        // transcript in the composer instead of pretending it was sent.
+        guard let chat, chat.phase == .idle else { abandonReview(); return }
         phase = .processing
         sendAndAwaitAnswer(text)
     }
 
+    /// Exits review without sending, salvaging the transcript into the composer
+    /// (unless a draft is already there). Used when the review UI goes away
+    /// without a decision: timeout, or the panel opening over it.
+    func abandonReview() {
+        guard phase == .review else { return }
+        reviewTimeoutTask?.cancel()
+        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let chat, !text.isEmpty, chat.input.trimmingCharacters(in: .whitespaces).isEmpty {
+            chat.input = text
+        }
+        finalized = ""
+        partial = ""
+        phase = .idle
+    }
+
     func cancel() {
         guard phase == .listening || phase == .processing || phase == .review else { return }
+        reviewTimeoutTask?.cancel()
         let engine = self.engine
         eventsTask?.cancel()
         Task { _ = await engine?.stop() }

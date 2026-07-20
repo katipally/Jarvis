@@ -150,7 +150,7 @@ struct HomeView: View {
                             ForEach(answerMessages) { message in
                                 MessageRow(
                                     message: message,
-                                    onRetry: (message.role == .assistant && chat.phase == .idle
+                                    onRetry: (message.role == .assistant && chat.canRetry
                                               && message.id == chat.latestAssistant?.id)
                                         ? { chat.retryLast() } : nil
                                 )

@@ -151,7 +151,9 @@ struct TasksPane: View {
     /// Due chip + preset menu. Presets beat a DatePicker in a panel this size.
     private func dueMenu(_ task: TaskRow) -> some View {
         Menu {
-            Button("Today 6 PM") { setDue(task.id, todayAt(hour: 18)) }
+            Button(Calendar.current.isDateInToday(todayAt(hour: 18)) ? "Today 6 PM" : "Tomorrow 6 PM") {
+                setDue(task.id, todayAt(hour: 18))
+            }
             Button("Tomorrow 9 AM") { setDue(task.id, tomorrowAt(hour: 9)) }
             Button("Next week") { setDue(task.id, nextWeek()) }
             if task.dueAt != nil {
@@ -191,8 +193,12 @@ struct TasksPane: View {
         return due < .now ? .jarvisError : .jarvisWarning
     }
 
+    /// Today at `hour`, rolling to tomorrow once that hour has passed — a due
+    /// preset must never produce an instantly-overdue task.
     private func todayAt(hour: Int) -> Date {
-        Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: .now) ?? .now
+        let cal = Calendar.current
+        let candidate = cal.date(bySettingHour: hour, minute: 0, second: 0, of: .now) ?? .now
+        return candidate > .now ? candidate : (cal.date(byAdding: .day, value: 1, to: candidate) ?? candidate)
     }
 
     private func tomorrowAt(hour: Int) -> Date {

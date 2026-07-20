@@ -60,11 +60,19 @@ struct TaskStore: Sendable {
     func addTask(text: String, source: TaskRow.Source, sourceID: String?, dueAt: Date? = nil,
                  status: TaskRow.Status = .suggested) async {
         _ = try? await database.writer.write { db in
-            let dup = try TaskRow
+            let existing = try TaskRow
                 .filter(Column("text") == text)
                 .filter([TaskRow.Status.suggested.rawValue, TaskRow.Status.open.rawValue].contains(Column("status")))
-                .fetchCount(db)
-            if dup > 0 { return }
+                .fetchOne(db)
+            if let existing {
+                // A manual add of an already-suggested task is an implicit
+                // accept — promote it instead of silently dropping the add.
+                if status == .open, existing.status == TaskRow.Status.suggested.rawValue {
+                    try db.execute(sql: "UPDATE task SET status = ? WHERE id = ?",
+                                   arguments: [TaskRow.Status.open.rawValue, existing.id])
+                }
+                return
+            }
             try TaskRow(text: text, source: source, sourceId: sourceID, status: status, dueAt: dueAt).insert(db)
         }
     }

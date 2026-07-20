@@ -51,19 +51,23 @@ public struct NudgeFunnel: Sendable {
     public init(database: JarvisDatabase) { self.database = database }
 
     /// True if a nudge with this dedup key may be delivered now.
+    /// Suppressed rows (CRITIC-vetoed drafts recorded for the Activity
+    /// timeline) are excluded from every check — only DELIVERED nudges may
+    /// consume the cooldown, the daily cap, or the dedup window.
     public func canDeliver(dedupKey: String?, now: Date = .now) async -> Bool {
         let cooldown = globalCooldown * max(1, cooldownMultiplier)
         return (try? await database.reader.read { db -> Bool in
-            if let last = try NudgeRow.order(Column("created_at").desc).fetchOne(db),
+            let delivered = NudgeRow.filter(Column("state") != "suppressed")
+            if let last = try delivered.order(Column("created_at").desc).fetchOne(db),
                now.timeIntervalSince(last.createdAt) < cooldown {
                 return false
             }
             let dayAgo = now.addingTimeInterval(-86400)
-            let todayCount = try NudgeRow.filter(Column("created_at") >= dayAgo).fetchCount(db)
+            let todayCount = try delivered.filter(Column("created_at") >= dayAgo).fetchCount(db)
             if todayCount >= dailyCap { return false }
             if let dedupKey {
                 let window = now.addingTimeInterval(-dedupWindow)
-                let dup = try NudgeRow
+                let dup = try delivered
                     .filter(Column("dedup_key") == dedupKey && Column("created_at") >= window)
                     .fetchCount(db)
                 if dup > 0 { return false }
