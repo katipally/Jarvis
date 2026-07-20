@@ -173,6 +173,13 @@ struct HomeView: View {
                     onBrowsingChange(false)
                     suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
                     withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
+                } else if scrollMode == .pinned {
+                    // Answer finished: pin it to the TOP so ONLY the AI response
+                    // is on screen — the user's prompt and older messages fall
+                    // above the fold, and any slack sits empty below the answer
+                    // (never revealing prior, which the bottom anchor did).
+                    suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
+                    withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .top) }
                 }
             }
             // One-way state machine: scrolling up enters browsing; NOTHING the
@@ -193,7 +200,7 @@ struct HomeView: View {
                         scrollMode = .pinned
                         onBrowsingChange(false)
                         suppressGeometryUntil = Date.now.addingTimeInterval(0.6)
-                        withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
+                        withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .top) }
                     }
                     return
                 }
@@ -215,7 +222,10 @@ struct HomeView: View {
                               lastDistanceFromBottom > 6 else { return }
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
-                        withTransaction(transaction) { proxy.scrollTo("live-bottom", anchor: .bottom) }
+                        // Follow the bottom while streaming; hold the answer at
+                        // the top once settled so only the response shows.
+                        let anchor: UnitPoint = chat.phase == .responding ? .bottom : .top
+                        withTransaction(transaction) { proxy.scrollTo("live-bottom", anchor: anchor) }
                     }
                 }
             }
@@ -225,7 +235,19 @@ struct HomeView: View {
                 scrollMode = .pinned
                 onBrowsingChange(false)
                 suppressGeometryUntil = Date.now.addingTimeInterval(0.6)
-                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
+                // From a scrolled-up position this animates DOWN to the latest
+                // answer, then pins it to the top so only the response shows.
+                withAnimation(.snappy(duration: 0.35)) { proxy.scrollTo("live-bottom", anchor: .top) }
+            }
+            .onAppear {
+                // First show (incl. a restored conversation) pins the latest
+                // answer to the top so only the AI response is visible — the
+                // default bottom anchor would sit against the prior message.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(60))
+                    guard scrollMode == .pinned else { return }
+                    proxy.scrollTo("live-bottom", anchor: .top)
+                }
             }
         }
         .defaultScrollAnchor(.bottom)
