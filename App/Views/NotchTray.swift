@@ -7,7 +7,6 @@ import SwiftUI
 enum NotchTrayMode: Equatable {
     case hidden
     case composer
-    case backToLatest
     case stop
     case continueChat
 }
@@ -19,7 +18,6 @@ struct NotchTray: View {
     let mode: NotchTrayMode
     @Bindable var chat: ChatStore
     var voice: VoiceController?
-    var onBackToLatest: () -> Void = {}
     var onContinue: () -> Void = {}
 
     @FocusState private var inputFocused: Bool
@@ -30,9 +28,6 @@ struct NotchTray: View {
         Group {
             switch mode {
             case .composer: composer
-            case .backToLatest:
-                actionPill(icon: "chevron.down", label: "Back to latest",
-                           action: onBackToLatest)
             case .stop: stopPill
             case .continueChat:
                 actionPill(icon: "arrow.uturn.left", label: "Continue",

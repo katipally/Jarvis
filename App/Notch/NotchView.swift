@@ -28,8 +28,6 @@ struct NotchView: View {
     /// Which History conversation is open in the detail view (drives the tray's
     /// "Continue" slot). Mirrored from HistoryView.
     @State private var historyOpenSegmentID: String?
-    /// Bumped when the tray's "Back to latest" pill is tapped.
-    @State private var returnToLatestSignal = 0
     @Namespace private var tabPillNamespace
     /// Shared geometry namespace for the compact-bar → open morph: the camera
     /// void and the left/right flanks physically travel into the tab header
@@ -177,7 +175,7 @@ struct NotchView: View {
     private var trayMode: NotchTrayMode {
         if chat?.phase == .responding { return .stop }
         switch vm.selectedTab {
-        case .home: return vm.homeBrowsingHistory ? .backToLatest : .composer
+        case .home: return .composer
         case .history: return historyOpenSegmentID != nil ? .continueChat : .hidden
         default: return .hidden
         }
@@ -192,7 +190,6 @@ struct NotchView: View {
                     mode: trayMode,
                     chat: chat,
                     voice: voice,
-                    onBackToLatest: { returnToLatestSignal += 1 },
                     onContinue: continueOpenHistory
                 )
                 .frame(width: trayWidth)
@@ -253,7 +250,6 @@ struct NotchView: View {
         // loop from reoscillating (Step 4). homeBodyHeight/homeBrowsingHistory are
         // deliberately not part of `presentation`.
         .animation(tabAnimation, value: vm.homeBodyHeight)
-        .animation(tabAnimation, value: vm.homeBrowsingHistory)
         .animation(.easeInOut(duration: 0.35), value: showsGlow)
     }
 
@@ -431,14 +427,12 @@ struct NotchView: View {
                 HomeView(
                     chat: chat, voice: voice, meetings: meetings,
                     onBodyHeightChange: { bodyHeight in
-                        // Grow the notch to fit the answer (NotchViewModel caps
-                        // at half the screen); ignore sub-4pt jitter.
+                        // Grow the notch to fit the transcript (NotchViewModel
+                        // caps at half the screen); ignore sub-4pt jitter.
                         if abs((vm.homeBodyHeight ?? 0) - bodyHeight) > 4 {
                             vm.homeBodyHeight = bodyHeight
                         }
-                    },
-                    onBrowsingChange: { browsing in vm.homeBrowsingHistory = browsing },
-                    returnToLatestSignal: returnToLatestSignal
+                    }
                 )
             case .history:
                 HistoryView(

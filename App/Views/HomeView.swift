@@ -7,29 +7,14 @@ struct HomeView: View {
     @Bindable var chat: ChatStore
     var voice: VoiceController?
     var meetings: MeetingService?
-    /// Reports the height the body wants (current answer + composer) so the
-    /// notch can grow to fit the answer — capped by the view model.
+    /// Reports the height the transcript wants so the notch grows to fit it,
+    /// capped by the view model. Home is a plain chat: the full session history,
+    /// newest at the bottom, auto-growing to fit then scrolling.
     var onBodyHeightChange: (CGFloat) -> Void = { _ in }
-    /// Reports whether the user has scrolled up into history (the panel then
-    /// opens to a comfortable reading height).
-    var onBrowsingChange: (Bool) -> Void = { _ in }
-    /// Bumped by the tray's "Back to latest" pill (which lives outside the body
-    /// now). A change re-pins the transcript to the focused answer.
-    var returnToLatestSignal: Int = 0
 
     @State private var isDropTargeted = false
-    @State private var answerHeight: CGFloat = 0
+    @State private var contentHeight: CGFloat = 0
     @State private var accessoriesHeight: CGFloat = 0
-
-    /// Pinned = glued to the latest answer; browsing = reading history.
-    private enum ScrollMode { case pinned, browsing }
-    @State private var scrollMode: ScrollMode = .pinned
-    /// Geometry changes caused by our own panel resizes are ignored until this
-    /// instant so the resize can't re-trigger itself (the oscillation bug).
-    @State private var suppressGeometryUntil = Date.distantPast
-    @State private var lastDistanceFromBottom: CGFloat = 0
-    @State private var lastReportedBodyHeight: CGFloat = 0
-    @State private var repinTask: Task<Void, Never>?
 
     /// Comfortable body height for the greeting (no conversation yet).
     private let greetingBaseHeight: CGFloat = 190
@@ -40,44 +25,9 @@ struct HomeView: View {
         chat.messages.filter { !($0.isError && $0.text == chat.errorText) }
     }
 
-    /// Rows AFTER the last user message: the latest AI response, pinned alone in
-    /// focus. The user's prompt and all earlier history live above the fold
-    /// (scroll up to see) — "focus" means only the answer is on screen.
-    private var answerStartIndex: Int? {
-        guard !visibleMessages.isEmpty else { return nil }
-        guard let lastUser = visibleMessages.lastIndex(where: { $0.role == .user }) else { return 0 }
-        let start = lastUser + 1
-        return start < visibleMessages.count ? start : nil
-    }
-
-    private var priorMessages: ArraySlice<DisplayMessage> {
-        visibleMessages[..<(answerStartIndex ?? visibleMessages.count)]
-    }
-
-    private var answerMessages: ArraySlice<DisplayMessage> {
-        guard let start = answerStartIndex else { return visibleMessages[visibleMessages.endIndex...] }
-        return visibleMessages[start...]
-    }
-
     private func reportBodyHeight() {
-        // Waiting for the first token of a new answer: hold the current size
-        // instead of collapsing and re-growing.
-        if chat.phase == .responding, answerMessages.isEmpty { return }
-        let content = answerMessages.isEmpty ? greetingBaseHeight : answerHeight
-        // Allowance = bottom padding (10) + a slice of the 14pt gap above the
-        // answer. Must stay ≤ 24 or the previous bubble's bottom edge leaks
-        // into the top of the frame.
-        let spacingAllowance: CGFloat = priorMessages.isEmpty ? 16 : 17
-        // The composer no longer lives in the body (it's the floating tray), so
-        // only the transient accessories (attachments/error) add to the height.
-        let newValue = content + accessoriesHeight + spacingAllowance
-        if abs(newValue - lastReportedBodyHeight) > 8 {
-            // This report will resize the panel — don't let the resulting
-            // geometry churn masquerade as a user scroll.
-            lastReportedBodyHeight = newValue
-            suppressGeometryUntil = max(suppressGeometryUntil, Date.now.addingTimeInterval(0.45))
-        }
-        onBodyHeightChange(newValue)
+        let content = visibleMessages.isEmpty ? greetingBaseHeight : contentHeight
+        onBodyHeightChange(content + accessoriesHeight + 16)
     }
 
     var body: some View {
@@ -115,9 +65,8 @@ struct HomeView: View {
         .animation(.snappy, value: isDropTargeted)
     }
 
-    /// Answer-focused transcript: the notch fits the current answer, so only it
-    /// is visible; the user's message, earlier exchanges, and older sessions sit
-    /// above the fold and appear on scroll-up (iMessage style).
+    /// The full conversation, newest at the bottom. The notch auto-grows to fit
+    /// the transcript (capped by the view model); longer histories scroll.
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -136,131 +85,42 @@ struct HomeView: View {
                             .containerRelativeFrame(.vertical) { height, _ in height * 0.96 }
                             .frame(maxWidth: .infinity)
                     } else {
-                        ForEach(priorMessages) { message in
-                            MessageRow(message: message)
+                        ForEach(visibleMessages) { message in
+                            MessageRow(
+                                message: message,
+                                onRetry: (message.role == .assistant && chat.canRetry
+                                          && message.id == chat.latestAssistant?.id)
+                                    ? { chat.retryLast() } : nil,
+                                onFollowUp: message.isProactive
+                                    ? { chat.askFollowUp("Tell me more about that.", from: message.id) } : nil,
+                                onDismiss: message.isProactive
+                                    ? { chat.dismissProactive(message.id) } : nil
+                            )
                         }
-                        // The in-focus exchange: measured as one unit so the panel
-                        // can grow to fit exactly this content.
-                        VStack(alignment: .leading, spacing: 14) {
-                            ForEach(answerMessages) { message in
-                                MessageRow(
-                                    message: message,
-                                    onRetry: (message.role == .assistant && chat.canRetry
-                                              && message.id == chat.latestAssistant?.id)
-                                        ? { chat.retryLast() } : nil,
-                                    onFollowUp: message.isProactive
-                                        ? { chat.askFollowUp("Tell me more about that.", from: message.id) } : nil,
-                                    onDismiss: message.isProactive
-                                        ? { chat.dismissProactive(message.id) } : nil
-                                )
-                            }
-                        }
-                        .id("live-bottom")
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                            answerHeight = height
-                            reportBodyHeight()
-                        }
+                        Color.clear.frame(height: 1).id("bottom-anchor")
                     }
                 }
                 .padding(.top, 4)
                 .padding(.bottom, 10)
-            }
-            // Sending re-pins the view to the incoming answer even if the user
-            // had scrolled up into history (iMessage behavior).
-            .onChange(of: chat.phase) { _, phase in
-                if phase == .responding {
-                    scrollMode = .pinned
-                    onBrowsingChange(false)
-                    suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
-                    withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
-                } else if scrollMode == .pinned {
-                    // Answer finished: pin it to the TOP so ONLY the AI response
-                    // is on screen — the user's prompt and older messages fall
-                    // above the fold, and any slack sits empty below the answer
-                    // (never revealing prior, which the bottom anchor did).
-                    suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
-                    withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .top) }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    contentHeight = height
+                    reportBodyHeight()
                 }
             }
-            // One-way state machine: scrolling up enters browsing; NOTHING the
-            // scroll does ever leaves it (only the button, a send, or a fresh
-            // panel-open do). Resizes therefore can't feed back into mode
-            // changes — the oscillation class of bugs is impossible.
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentSize.height
-                    - (geometry.contentOffset.y + geometry.containerSize.height)
-            } action: { _, distance in
-                lastDistanceFromBottom = distance
-                if scrollMode == .browsing {
-                    // Reaching the true bottom under the user's own scroll
-                    // restores the composer + re-focuses the latest exchange.
-                    // Gated on the suppression window so our own resize nudges
-                    // (which also land near the bottom) can't trip it.
-                    if Date.now >= suppressGeometryUntil, distance <= 24 {
-                        scrollMode = .pinned
-                        onBrowsingChange(false)
-                        suppressGeometryUntil = Date.now.addingTimeInterval(0.6)
-                        withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .top) }
-                    }
-                    return
-                }
-                if Date.now >= suppressGeometryUntil, distance > 44 {
-                    // Real upward scroll: enter browsing and open reading room.
-                    scrollMode = .browsing
-                    onBrowsingChange(true)
-                    suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
-                } else if distance > 6 {
-                    // Drift from our own resizes/streaming/restore: quietly
-                    // re-pin once things settle. Scheduled even while geometry
-                    // is suppressed — the task itself waits the suppression out,
-                    // so pinned mode always converges to the bottom.
-                    let wait = max(0.2, suppressGeometryUntil.timeIntervalSinceNow + 0.15)
-                    repinTask?.cancel()
-                    repinTask = Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(wait))
-                        guard !Task.isCancelled, scrollMode == .pinned,
-                              lastDistanceFromBottom > 6 else { return }
-                        var transaction = Transaction()
-                        transaction.disablesAnimations = true
-                        // Follow the bottom while streaming; hold the answer at
-                        // the top once settled so only the response shows.
-                        let anchor: UnitPoint = chat.phase == .responding ? .bottom : .top
-                        withTransaction(transaction) { proxy.scrollTo("live-bottom", anchor: anchor) }
-                    }
+            .defaultScrollAnchor(.bottom)
+            .scrollIndicators(.hidden)
+            .mask {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.black.opacity(0.2), .black], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 10)
+                    Rectangle()
+                    LinearGradient(colors: [.black, .black.opacity(0.2)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 8)
                 }
             }
-            // The tray's "Back to latest" pill lives outside the body; it bumps
-            // returnToLatestSignal, observed here where the proxy lives.
-            .onChange(of: returnToLatestSignal) { _, _ in
-                scrollMode = .pinned
-                onBrowsingChange(false)
-                suppressGeometryUntil = Date.now.addingTimeInterval(0.6)
-                // From a scrolled-up position this animates DOWN to the latest
-                // answer, then pins it to the top so only the response shows.
-                withAnimation(.snappy(duration: 0.35)) { proxy.scrollTo("live-bottom", anchor: .top) }
-            }
-            .onAppear {
-                // First show (incl. a restored conversation) pins the latest
-                // answer to the top so only the AI response is visible — the
-                // default bottom anchor would sit against the prior message.
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(60))
-                    guard scrollMode == .pinned else { return }
-                    proxy.scrollTo("live-bottom", anchor: .top)
-                }
-            }
-        }
-        .defaultScrollAnchor(.bottom)
-        .scrollIndicators(.hidden)
-        .mask {
-            // Content dissolves at the edges instead of clipping hard. Kept
-            // shallow so a tightly-fitted one-line answer isn't dimmed.
-            VStack(spacing: 0) {
-                LinearGradient(colors: [.black.opacity(0.2), .black], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 10)
-                Rectangle()
-                LinearGradient(colors: [.black, .black.opacity(0.2)], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 8)
+            // Jump to the newest message when a turn starts or a message arrives.
+            .onChange(of: chat.messages.count) { _, _ in
+                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("bottom-anchor", anchor: .bottom) }
             }
         }
     }

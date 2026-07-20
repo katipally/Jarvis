@@ -95,13 +95,6 @@ final class NotchViewModel {
     /// tall empty one. The greeting reports its own comfortable height instead.
     var homeMinHeight: CGFloat { clamp(screenFrame.height * 0.09, 96, 124) }
     var homeMaxHeight: CGFloat { screenFrame.height * 0.5 }
-    /// While the user reads history the panel opens up to at least 30% of the
-    /// screen — short answers shouldn't force reading through a slot.
-    var homeBrowsingHeight: CGFloat { screenFrame.height * 0.30 }
-
-    /// True while the user has scrolled up into history (not pinned to the
-    /// latest answer). Set by the chat view.
-    var homeBrowsingHistory = false
 
     /// Each tab expands the notch to its own proportion of the screen.
     func openContentSize(for tab: Tab) -> CGSize {
@@ -109,11 +102,8 @@ final class NotchViewModel {
         let h = screenFrame.height
         switch tab {
         case .home:
-            var height = homeBodyHeight.map { clamp($0 + homeChromeHeight, homeMinHeight, homeMaxHeight) }
+            let height = homeBodyHeight.map { clamp($0 + homeChromeHeight, homeMinHeight, homeMaxHeight) }
                 ?? homeMinHeight
-            if homeBrowsingHistory {
-                height = max(height, min(homeBrowsingHeight, homeMaxHeight))
-            }
             return CGSize(width: clamp(w * 0.32, 440, 540), height: height)
         case .history:
             return CGSize(width: clamp(w * 0.40, 520, 680), height: clamp(h * 0.34, 240, 400))
