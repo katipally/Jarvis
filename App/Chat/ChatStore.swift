@@ -274,6 +274,8 @@ final class ChatStore {
         }
 
         lastUserText = userText
+        lastInteraction = .now
+        UserDefaults.standard.set(Date.now, forKey: Self.lastInteractionKey)
         messages.append(DisplayMessage(id: UUID().uuidString, role: .user, text: trimmed, images: images))
 
         input = ""
@@ -316,6 +318,13 @@ final class ChatStore {
                 // Fresh segment = fresh context; the closed segment's content is
                 // handed to memory extraction, not resent forever.
                 self?.transcript = []
+                // Also clear the VISIBLE history so an idle split shows a fresh
+                // chat, keeping only this turn's message(s) — otherwise the notch
+                // stays stuck showing the old conversation.
+                if let self, let lastUser = self.messages.lastIndex(where: { $0.role == .user }) {
+                    self.messages = Array(self.messages[lastUser...])
+                    self.hasOlderHistory = false
+                }
             }
 
             // Dynamic per-turn context (date/time, frontmost app, memory) rides
@@ -470,6 +479,22 @@ final class ChatStore {
 
     func interrupt() {
         runTask?.cancel()
+    }
+
+    private static let lastInteractionKey = "jarvis.lastInteraction"
+    /// Wall-clock of the last send. Persisted so an idle gap survives relaunch.
+    private var lastInteraction: Date =
+        (UserDefaults.standard.object(forKey: ChatStore.lastInteractionKey) as? Date) ?? .distantPast
+
+    /// Called when the notch opens. If it's been idle longer than the session
+    /// gap, the previous conversation is stale — start a fresh one so opening
+    /// after a break lands on a clean chat (not stuck in the old one).
+    func notchDidOpen() {
+        guard phase == .idle, !messages.isEmpty else { return }
+        let gap = TimeInterval(max(1, core.sessionGapMinutes) * 60)
+        if Date.now.timeIntervalSince(lastInteraction) > gap {
+            newSession()
+        }
     }
 
     /// Start a fresh conversation: closes the current segment (it moves to the

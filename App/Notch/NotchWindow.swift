@@ -19,8 +19,6 @@ final class NotchWindow: NSPanel {
         hasShadow = false
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
-        // Take keyboard only when a text field is clicked — not on hover/buttons.
-        becomesKeyOnlyIfNeeded = true
         level = Self.normalLevel
         collectionBehavior = [
             .fullScreenAuxiliary,
@@ -39,9 +37,24 @@ final class NotchWindow: NSPanel {
         level = yields ? .floating : Self.normalLevel
     }
 
-    // Must become key so text fields (composer, API key entry) accept input.
-    // .nonactivatingPanel keeps the underlying app active while we take keyboard.
-    override var canBecomeKey: Bool { true }
+    /// The panel takes the keyboard only while it's expanded (see
+    /// NotchScreenManager.updateKeyboardCapture): opening focuses the composer so
+    /// you can type straight in; closing hands the keyboard back to your app.
+    /// .nonactivatingPanel keeps the underlying app active throughout.
+    var keyboardCaptureAllowed = false {
+        didSet {
+            guard oldValue != keyboardCaptureAllowed else { return }
+            if keyboardCaptureAllowed {
+                makeKey()
+            } else if isKeyWindow {
+                // Give up key + first responder so the frontmost app's window
+                // reclaims the keyboard (the notch stays on top at its level).
+                makeFirstResponder(nil)
+                resignKey()
+            }
+        }
+    }
+    override var canBecomeKey: Bool { keyboardCaptureAllowed }
     override var canBecomeMain: Bool { false }
 }
 

@@ -135,12 +135,17 @@ final class NotchScreenManager {
         lastPointer.removeAll()
     }
 
-    /// Keep the monitors installed exactly while at least one panel is open.
+    /// Keep the monitors installed exactly while at least one panel is open, and
+    /// hand the keyboard to whichever panel is open (composer typing) — releasing
+    /// it back to the user's app when all panels close.
     private func updateMouseMonitors() {
         if panels.values.contains(where: { $0.vm.state == .open }) {
             installMouseMonitors()
         } else {
             removeMouseMonitors()
+        }
+        for panel in panels.values {
+            panel.window.keyboardCaptureAllowed = (panel.vm.state == .open)
         }
     }
 

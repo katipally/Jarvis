@@ -23,6 +23,7 @@ struct NotchView: View {
     var voice: VoiceController?
     var meetings: MeetingService?
     @State private var isHovering = false
+    @State private var isDropTargeted = false
     @State private var peekText: String?
     @State private var peekDismiss: Task<Void, Never>?
     /// Which History conversation is open in the detail view (drives the tray's
@@ -272,6 +273,33 @@ struct NotchView: View {
                 guard vm.state == .closed else { return }
                 withAnimation(openAnimation) { vm.open() }
             }
+            // Drop files anywhere on the notch: they pile up as attachment chips
+            // and go out with the next message. Opens Home so the chips show.
+            .dropDestination(for: URL.self) { urls, _ in
+                guard let chat else { return false }
+                var added = false
+                for url in urls {
+                    if let attachment = AttachmentLoader.load(url: url) {
+                        chat.addAttachment(attachment)
+                        added = true
+                    }
+                }
+                if added {
+                    vm.selectedTab = .home
+                    if vm.state == .closed { withAnimation(openAnimation) { vm.open() } }
+                }
+                return added
+            } isTargeted: { isDropTargeted = $0 }
+            .overlay {
+                if isDropTargeted {
+                    RoundedRectangle(cornerRadius: topCornerRadius, style: .continuous)
+                        .strokeBorder(.white.opacity(0.5), style: StrokeStyle(lineWidth: 2, dash: [6]))
+                        .padding(4)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.snappy, value: isDropTargeted)
     }
 
     /// The rendered content — a pure `switch` over the same `presentation` that
@@ -338,7 +366,10 @@ struct NotchView: View {
             }
         }
         .onChange(of: vm.state) { _, newState in
-            if newState == .open { chat?.markProactiveRead() }
+            if newState == .open {
+                chat?.notchDidOpen()   // start fresh if we've been idle past the gap
+                chat?.markProactiveRead()
+            }
         }
         // Nudge peek: a fresh proactive message briefly expands the closed
         // notch with its first line (Dynamic Island grammar), then retracts.
