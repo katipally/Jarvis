@@ -90,9 +90,10 @@ final class NotchViewModel {
     /// Home chrome above/below the body (header row + content paddings).
     private var homeChromeHeight: CGFloat { closedNotchSize.height + 8 + 16 }
 
-    /// Low floor: a one-line answer should give a compact panel, not a tall
-    /// empty one; the greeting reports its own comfortable height instead.
-    var homeMinHeight: CGFloat { clamp(screenFrame.height * 0.12, 120, 150) }
+    /// Comfortable focus floor: a one-line answer still gets a roomy card, not a
+    /// sliver. The focused answer is top-aligned within it, so short replies read
+    /// cleanly and "Back to latest" always re-frames to at least this.
+    var homeMinHeight: CGFloat { clamp(screenFrame.height * 0.15, 180, 240) }
     var homeMaxHeight: CGFloat { screenFrame.height * 0.5 }
     /// While the user reads history the panel opens up to at least 30% of the
     /// screen — short answers shouldn't force reading through a slot.
@@ -134,7 +135,7 @@ final class NotchViewModel {
         case .listening(let phase): phase == .review ? listeningReviewSize : listeningSize
         case .peek: listeningSize
         case .meeting: closedStatusSize
-        case .working: listeningSize   // taller: holds the Live Activity title line
+        case .working: workingSize     // two lines: holds the verbose status text
         case .idle: closedNotchSize
         }
     }
@@ -147,7 +148,7 @@ final class NotchViewModel {
     /// Compact size shown while listening: waveform flanks the camera on the top
     /// row, the transcript sits on one line BELOW the camera cutout.
     var listeningSize: CGSize {
-        CGSize(width: clamp(closedNotchSize.width + NotchMetrics.listeningExtraWidth, 340, 400),
+        CGSize(width: clamp(closedNotchSize.width + NotchMetrics.listeningExtraWidth, 235, 320),
                height: closedNotchSize.height + NotchMetrics.listeningExtraHeight)
     }
 
@@ -155,6 +156,14 @@ final class NotchViewModel {
     /// plus the send/cancel pair.
     var listeningReviewSize: CGSize {
         CGSize(width: listeningSize.width, height: closedNotchSize.height + NotchMetrics.reviewExtraHeight)
+    }
+
+    /// The compact glowing "working" bar: slightly wider than closed and two
+    /// lines tall (verbose status below the camera). Shown while the agent is
+    /// working, then it expands to the answer.
+    var workingSize: CGSize {
+        CGSize(width: clamp(closedNotchSize.width + NotchMetrics.workingExtraWidth, 320, 400),
+               height: closedNotchSize.height + NotchMetrics.workingExtraHeight)
     }
 
     /// Slim closed-notch status bar (meeting timer, background-run pulse):
@@ -176,7 +185,9 @@ final class NotchViewModel {
     var windowSize: CGSize {
         CGSize(
             width: maxOpenContentSize.width + NotchMetrics.shadowPadding * 2,
-            height: maxOpenContentSize.height + NotchMetrics.shadowPadding
+            // Reserve room BELOW the body for the floating glass tray so a
+            // max-height answer plus the tray still fits in the fixed window.
+            height: maxOpenContentSize.height + NotchMetrics.trayReserve + NotchMetrics.shadowPadding
         )
     }
 
@@ -189,6 +200,21 @@ final class NotchViewModel {
             y: screenFrame.maxY - size.height,
             width: size.width,
             height: size.height
+        )
+    }
+
+    /// The floating glass tray's region in screen coordinates: directly below
+    /// the body, separated by `trayGap`. Union'd with `visibleRect` for the
+    /// auto-close hit region so moving onto the composer/Stop never reads as
+    /// "left the panel".
+    func trayRect(open: Bool) -> CGRect {
+        let body = visibleRect(open: open)
+        let height = NotchMetrics.trayHeight
+        return CGRect(
+            x: body.midX - body.width / 2,
+            y: body.minY - NotchMetrics.trayGap - height,
+            width: body.width,
+            height: height
         )
     }
 

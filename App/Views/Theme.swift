@@ -19,15 +19,29 @@ enum NotchMetrics {
     static let cameraSideReserve: CGFloat = 22
     /// Central void reserved for the camera in the open tab header.
     static let headerCameraReserve: CGFloat = 28
-    /// Width added to the closed notch for the slim status bar (meeting/working).
+    /// Width added to the closed notch for the slim status bar (meeting).
     static let statusExtraWidth: CGFloat = 150
-    /// Width/height added to the closed notch for the listening chrome.
-    static let listeningExtraWidth: CGFloat = 200
+    /// Width/height added to the closed notch for the listening chrome. Kept
+    /// minimal — just enough for the small waveform + a short transcript line;
+    /// longer transcripts scroll/truncate at the head.
+    static let listeningExtraWidth: CGFloat = 50
     static let listeningExtraHeight: CGFloat = 26
+    /// The compact foreground/background "working" bar: a touch wider than
+    /// listening and two lines tall so the verbose status ("Searching the web:
+    /// …") fits without truncating mid-word.
+    static let workingExtraWidth: CGFloat = 170
+    static let workingExtraHeight: CGFloat = 44
     /// Extra height for the dictation-review state (transcript + send/cancel).
     static let reviewExtraHeight: CGFloat = 96
     /// Slack around the content so the fixed window can hold the glow bleed + shadow.
     static let shadowPadding: CGFloat = 22
+    /// The floating glass tray (composer / Back-to-latest / Stop / Continue)
+    /// lives BELOW the black body: this is the gap between the notch's bottom
+    /// edge and the tray, and the tray's own height. The window reserves both so
+    /// a max-height answer plus the tray still fits inside the fixed panel.
+    static let trayGap: CGFloat = 10
+    static let trayHeight: CGFloat = 46
+    static let trayReserve: CGFloat = 10 + 46 + 12 // gap + height + breathing room
     /// Corner radii: (top, bottom) for the closed notch and the open panel.
     static let cornerClosed: (top: CGFloat, bottom: CGFloat) = (6, 14)
     static let cornerOpen: (top: CGFloat, bottom: CGFloat) = (20, 26)

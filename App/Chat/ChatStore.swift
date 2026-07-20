@@ -19,6 +19,8 @@ struct DisplayMessage: Identifiable, Equatable {
     var toolState: ToolState? = nil
     /// A Jarvis-initiated (proactive) message the user can act on inline.
     var isProactive: Bool = false
+    /// The user hit Stop mid-stream: the partial answer is kept and tagged.
+    var isStopped: Bool = false
 }
 
 extension DisplayMessage {
@@ -104,10 +106,21 @@ final class ChatStore {
     }
     var liveActivity: LiveActivity?
 
+    /// Foreground working state: while true the notch shows the compact glowing
+    /// working bar (status below the camera) instead of the open panel. Flips
+    /// false when the answer begins streaming (or on Stop), so the notch expands
+    /// to the focused answer. Set for every foreground run.
+    var isWorkingCompact = false
+    /// Live "what Jarvis is doing right now" for the FOREGROUND compact working
+    /// bar, projected from the agent event stream (thinking → tool → writing).
+    var foregroundActivity: LiveActivity?
+
     /// Friendly, user-facing label for a tool while it runs — never the raw tool
-    /// name. Drives the notch Live Activity's per-step text.
-    static func activityLabel(forTool name: String) -> LiveActivity {
-        switch name {
+    /// name. Drives the notch Live Activity's per-step text. When the tool's
+    /// input carries a concrete target (a query, url, title…), it's appended so
+    /// the status reads "Reading the web: apple.com".
+    static func activityLabel(forTool name: String, input: JSONValue? = nil) -> LiveActivity {
+        let base: LiveActivity = switch name {
         case "search_memory", "recall_screen": LiveActivity(title: "Recalling", symbol: "brain")
         case "search_screen", "fetch_frames", "take_screenshot", "ui_snapshot":
             LiveActivity(title: "Reviewing your screen", symbol: "eye")
@@ -116,10 +129,27 @@ final class ChatStore {
         case "mail_send": LiveActivity(title: "Drafting mail", symbol: "envelope")
         case "notes_create": LiveActivity(title: "Writing a note", symbol: "note.text")
         case "fetch_url", "open_url": LiveActivity(title: "Reading the web", symbol: "globe")
+        case "web_search", "search_web": LiveActivity(title: "Searching the web", symbol: "globe")
         case "schedule_task", "list_scheduled_tasks", "cancel_scheduled_task":
             LiveActivity(title: "Managing your schedule", symbol: "clock")
         default: LiveActivity(title: "Working", symbol: "sparkles")
         }
+        guard let target = toolTarget(input) else { return base }
+        return LiveActivity(title: "\(base.title): \(target)", symbol: base.symbol)
+    }
+
+    /// Best-effort concrete target from a tool's JSON input, truncated so the
+    /// compact status line never overflows.
+    private static func toolTarget(_ input: JSONValue?) -> String? {
+        guard case .object(let obj)? = input else { return nil }
+        for key in ["query", "q", "url", "prompt", "text", "title", "path", "name"] {
+            if case .string(let s)? = obj[key] {
+                let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !t.isEmpty else { continue }
+                return t.count > 36 ? String(t.prefix(35)) + "…" : t
+            }
+        }
+        return nil
     }
     /// Rendered Active-facet lines ("how the user likes things"), maintained by
     /// ConsciousnessService after each rebuild; rides in the per-turn context.
@@ -246,6 +276,10 @@ final class ChatStore {
         attachments = []
         errorText = nil
         phase = .responding
+        // Enter the compact glowing working state; it flips to the expanded
+        // answer at the first token of prose (see .textDelta below).
+        isWorkingCompact = true
+        foregroundActivity = LiveActivity(title: "Thinking", symbol: "sparkles")
         activeAssistantID = nil
         pendingToolResults = []
 
@@ -303,8 +337,15 @@ final class ChatStore {
                 case .runStarted:
                     break
                 case .textDelta(let t):
+                    // First prose token: leave the compact working bar and
+                    // expand to the streaming answer.
+                    if self.isWorkingCompact {
+                        self.isWorkingCompact = false
+                        self.foregroundActivity = LiveActivity(title: "Writing answer", symbol: "pencil")
+                    }
                     self.appendToAssistant(t, thinking: false)
                 case .thinkingDelta(let t):
+                    self.foregroundActivity = LiveActivity(title: "Thinking", symbol: "sparkles")
                     self.appendToAssistant(t, thinking: true)
                 case .assistantMessage(let m):
                     await self.flushPendingToolResults(runID: runID)
@@ -317,6 +358,7 @@ final class ChatStore {
                                                        runId: runID, model: model, provider: providerLabel)
                     }
                 case .toolCallStarted(let id, let name, let input):
+                    self.foregroundActivity = Self.activityLabel(forTool: name, input: input)
                     self.messages.append(DisplayMessage(id: id, role: .tool, toolName: name, toolState: .running))
                     await runStore.toolStarted(id: id, runID: runID, name: name, input: input)
                 case .toolCallFinished(let id, let output, let isError, let artifactID):
@@ -371,6 +413,9 @@ final class ChatStore {
             await runStore.finishRun(id: runID, status: status, usage: usage, error: errorText, costUSD: cost)
             guard let self else { return }
             self.phase = .idle
+            // Leave the compact working state so the panel settles on the answer.
+            self.isWorkingCompact = false
+            self.foregroundActivity = nil
             self.deliverQueuedProactive()
             if !interrupted { self.onRunComplete?() }
             self.memory?.turnCompleted() // debounced memory extraction after each user turn
@@ -601,6 +646,9 @@ final class ChatStore {
     }
 
     private func finalizeAssistant(_ message: NeutralMessage) {
+        // Providers that don't stream prose deltas still need to leave the
+        // compact working bar and expand to the finished answer.
+        if isWorkingCompact, !message.plainText.isEmpty { isWorkingCompact = false }
         if let id = activeAssistantID {
             mutate(id) { $0.text = message.plainText; $0.isStreaming = false }
             activeAssistantID = nil
@@ -652,10 +700,17 @@ final class ChatStore {
     }
 
     private func markActiveAborted() {
+        // Expand out of the compact working bar immediately so the partial
+        // answer (whatever streamed so far) is shown, not the collapsed bar.
+        isWorkingCompact = false
+        foregroundActivity = nil
         if let id = activeAssistantID {
             mutate(id) {
                 $0.isStreaming = false
-                if $0.text.isEmpty { $0.text = "_(cancelled)_" }
+                $0.isStopped = true
+                // The partial prose is kept as-is; only a truly empty answer
+                // gets a placeholder so the row isn't blank.
+                if $0.text.isEmpty { $0.text = "_Stopped before answering._" }
             }
             activeAssistantID = nil
         }
