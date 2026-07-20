@@ -16,8 +16,12 @@ final class NotchScreenManager {
     private var rebuildTask: Task<Void, Never>?
     private var mouseMonitors: [Any] = []
     /// Per-panel timestamp of when the pointer first left its close zone; reset
-    /// to nil whenever the pointer is back inside. Drives the 0.75s dwell.
+    /// to nil whenever the pointer is back inside (or while aiming toward it).
+    /// Drives the grace dwell.
     private var outsideSince: [CGDirectDisplayID: Date] = [:]
+    /// Previous pointer sample per panel, so we can tell whether the pointer is
+    /// moving TOWARD the panel (intent) versus drifting away.
+    private var lastPointer: [CGDirectDisplayID: CGPoint] = [:]
     /// Fires a delayed pointerMoved so a stationary-while-outside pointer still
     /// triggers the close. One pending task at a time.
     private var outsideRecheckTask: Task<Void, Never>?
@@ -128,6 +132,7 @@ final class NotchScreenManager {
         mouseMonitors.removeAll()
         outsideRecheckTask?.cancel()
         outsideSince.removeAll()
+        lastPointer.removeAll()
     }
 
     /// Keep the monitors installed exactly while at least one panel is open.
@@ -205,27 +210,40 @@ final class NotchScreenManager {
         return Panel(window: window, vm: vm)
     }
 
-    /// The single auto-close authority. A panel closes only after the pointer
-    /// has been continuously outside its (generously inset) visible region for
-    /// 0.75s, and never while a guard demands it stay up (see canAutoClose).
+    /// The single auto-close authority. The close zone is the SOLID region from
+    /// the notch body's top down to the floating tray's bottom (body ∪ tray,
+    /// generously inset) — so moving onto the composer / Stop pill never reads as
+    /// "left the panel" (the old body-only zone is what auto-closed voice input).
+    /// While the pointer is aiming toward that zone (intent), the grace dwell is
+    /// held; only a clear move away arms the ~0.45s close.
     private func pointerMoved() {
         let pointer = NSEvent.mouseLocation
         let now = Date.now
         var awaitingClose = false
 
         for (id, panel) in panels where panel.vm.state == .open {
-            // Test against the real visible region, not the (larger) fixed
-            // window, with a wide margin so small overshoots don't disarm it.
-            let zone = panel.vm.visibleRect(open: true).insetBy(dx: -64, dy: -64)
+            let zone = closeZone(panel.vm)
             if zone.contains(pointer) {
                 outsideSince[id] = nil
+                lastPointer[id] = pointer
+                continue
+            }
+
+            let prev = lastPointer[id] ?? pointer
+            lastPointer[id] = pointer
+
+            // Intent: still heading toward the panel → hold the close, but keep
+            // re-checking since the pointer may stop.
+            if isAiming(toward: zone, from: prev, to: pointer) {
+                outsideSince[id] = nil
+                awaitingClose = true
                 continue
             }
 
             let since = outsideSince[id] ?? now
             outsideSince[id] = since
 
-            if now.timeIntervalSince(since) >= 0.75, canAutoClose(panel) {
+            if now.timeIntervalSince(since) >= 0.45, canAutoClose(panel) {
                 outsideSince[id] = nil
                 withAnimation(NotchAnimation.close) { panel.vm.close() }
             } else {
@@ -240,6 +258,32 @@ final class NotchScreenManager {
         } else {
             outsideRecheckTask?.cancel()
         }
+    }
+
+    /// The solid body∪tray region, generously inset so the body↔tray gap and
+    /// small overshoots stay "inside".
+    private func closeZone(_ vm: NotchViewModel) -> CGRect {
+        vm.visibleRect(open: true).union(vm.trayRect(open: true)).insetBy(dx: -48, dy: -44)
+    }
+
+    /// Apple's "menu aim" intent, in velocity-cone form: the pointer counts as
+    /// aiming when it moved closer to the zone since the last sample AND its
+    /// movement points into the zone (within ~60° of straight-at-it). A
+    /// stationary or receding pointer is not aiming, so the dwell can run.
+    private func isAiming(toward zone: CGRect, from prev: CGPoint, to cur: CGPoint) -> Bool {
+        func distance(_ p: CGPoint) -> CGFloat {
+            let dx = max(zone.minX - p.x, 0, p.x - zone.maxX)
+            let dy = max(zone.minY - p.y, 0, p.y - zone.maxY)
+            return (dx * dx + dy * dy).squareRoot()
+        }
+        guard distance(cur) < distance(prev) - 0.5 else { return false }
+        let move = CGVector(dx: cur.x - prev.x, dy: cur.y - prev.y)
+        let toZone = CGVector(dx: zone.midX - prev.x, dy: zone.midY - prev.y)
+        let moveMag = (move.dx * move.dx + move.dy * move.dy).squareRoot()
+        let zoneMag = (toZone.dx * toZone.dx + toZone.dy * toZone.dy).squareRoot()
+        guard moveMag > 0.5, zoneMag > 0.5 else { return false }
+        let cosine = (move.dx * toZone.dx + move.dy * toZone.dy) / (moveMag * zoneMag)
+        return cosine > 0.5
     }
 
     /// The pointer can stop moving while outside a panel; without a timed
@@ -260,6 +304,7 @@ final class NotchScreenManager {
     private func canAutoClose(_ panel: Panel) -> Bool {
         guard panel.vm.canAutoClose else { return false }
         if chat?.phase == .responding { return false }
+        if chat?.isWorkingCompact == true { return false }
         if voice?.isActive == true { return false }
         if NSEvent.pressedMouseButtons != 0 { return false }
         return true
