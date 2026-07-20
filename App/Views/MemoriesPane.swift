@@ -23,13 +23,16 @@ struct MemoriesPane: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            header
-
+            // In graph mode the mode toggle rides inside GraphView's own toolbar
+            // (via `accessory`), so there's no separate header row / empty gap.
             switch mode {
-            case .list: list
+            case .list:
+                listHeader
+                list
             case .graph:
                 if let graphReader {
-                    GraphView(reader: graphReader, memoryStore: store)
+                    GraphView(reader: graphReader, memoryStore: store,
+                              accessory: AnyView(modeToggle))
                 } else {
                     JarvisEmptyState(symbol: "point.3.connected.trianglepath.dotted",
                                      title: "The graph isn't available")
@@ -43,37 +46,39 @@ struct MemoriesPane: View {
         }
     }
 
-    private var header: some View {
+    private var listHeader: some View {
         HStack(spacing: 8) {
-            if mode == .list {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.jarvisCaption)
-                        .foregroundStyle(Color.jarvisTextTertiary)
-                    TextField("Search memories", text: $query)
-                        .textFieldStyle(.plain)
-                        .font(.jarvisCaption)
-                        .foregroundStyle(Color.jarvisTextPrimary)
-                    if !query.isEmpty {
-                        Button { query = "" } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.jarvisCaption)
-                                .foregroundStyle(Color.jarvisTextTertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear search")
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.jarvisCaption)
+                    .foregroundStyle(Color.jarvisTextTertiary)
+                TextField("Search memories", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.jarvisCaption)
+                    .foregroundStyle(Color.jarvisTextPrimary)
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.jarvisCaption)
+                            .foregroundStyle(Color.jarvisTextTertiary)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(RoundedRectangle(cornerRadius: JarvisRadius.control, style: .continuous).fill(Color.jarvisSurface))
-            } else {
-                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: JarvisRadius.control, style: .continuous).fill(Color.jarvisSurface))
+            modeToggle
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private var modeToggle: some View {
+        HStack(spacing: 8) {
             modeButton(.list, symbol: "list.bullet", label: "Memory list")
             modeButton(.graph, symbol: "point.3.connected.trianglepath.dotted", label: "Knowledge graph")
         }
-        .padding(.horizontal, 2)
     }
 
     private func modeButton(_ target: Mode, symbol: String, label: String) -> some View {

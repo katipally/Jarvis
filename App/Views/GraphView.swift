@@ -7,13 +7,15 @@ import SwiftUI
 struct GraphView: View {
     let reader: GraphReader
     var memoryStore: KnowledgeStore?
+    /// Optional trailing control shown in the graph's own toolbar (e.g. the
+    /// list/graph mode toggle) so the parent doesn't need a second header row.
+    var accessory: AnyView? = nil
 
     @State private var snapshot = GraphReader.Snapshot(nodes: [], edges: [])
     @State private var positions: [String: CGPoint] = [:]
     @State private var velocities: [String: CGVector] = [:]
     @State private var selected: String?
     @State private var relatedMemories: [RetrievedFact] = []
-    @State private var includeHistory = false
     @State private var typeFilter: Set<String> = []
     @State private var layout: Task<Void, Never>?
     @State private var query = ""
@@ -47,7 +49,6 @@ struct GraphView: View {
             }
         }
         .task { await reload() }
-        .onChange(of: includeHistory) { _, _ in Task { await reload() } }
         .onChange(of: typeFilter) { _, _ in Task { await reload() } }
         .onChange(of: selected) { _, id in Task { await loadRelated(id) } }
         .onReceive(NotificationCenter.default.publisher(for: .jarvisGraphDidChange)) { _ in
@@ -82,10 +83,6 @@ struct GraphView: View {
             .background(RoundedRectangle(cornerRadius: JarvisRadius.control, style: .continuous).fill(Color.jarvisSurface))
             .frame(maxWidth: 200)
 
-            Toggle("History", isOn: $includeHistory)
-                .toggleStyle(.switch).controlSize(.mini)
-                .font(.jarvisCaption).foregroundStyle(Color.jarvisTextSecondary)
-
             Spacer()
 
             if zoom != 1 || pan != .zero {
@@ -107,6 +104,8 @@ struct GraphView: View {
                 .contentTransition(.numericText())
                 .animation(.snappy, value: snapshot.nodes.count)
                 .foregroundStyle(Color.jarvisTextTertiary)
+
+            if let accessory { accessory }
         }
         .padding(.horizontal, 4)
     }
@@ -484,7 +483,7 @@ struct GraphView: View {
     }
 
     private func reload() async {
-        var loaded = await reader.snapshot(includeHistory: includeHistory)
+        var loaded = await reader.snapshot()
         if !typeFilter.isEmpty {
             let nodes = loaded.nodes.filter { typeFilter.contains($0.kind) }
             let ids = Set(nodes.map(\.id))

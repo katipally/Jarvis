@@ -15,7 +15,7 @@ struct ProfileView: View {
     @State private var segment = 0
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             Picker("", selection: $segment) {
                 Text("Graph").tag(0)
                 Text("Decisions").tag(1)
@@ -24,7 +24,7 @@ struct ProfileView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(maxWidth: 400)
-            .padding(.top, 10)
+            .padding(.top, 6)
 
             Group {
                 switch segment {

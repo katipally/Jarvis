@@ -584,6 +584,19 @@ public final class JarvisDatabase: Sendable {
             try db.execute(sql: "DROP TABLE IF EXISTS facet")
         }
 
+        // Meeting transcription and the unshipped folder connector are gone, but
+        // their `world` rows linger on upgraded DBs (the old code created them and
+        // never deletes rows). Remove every world without a connector. Facts keep
+        // their content (episode_id is provenance only) — just detach then prune.
+        migrator.registerMigration("v16_prune_orphan_worlds") { db in
+            let known = ["chat", "screen", "calendar", "contacts", "mail", "imessage", "notes", "browser"]
+            let ph = known.map { _ in "?" }.joined(separator: ",")
+            let args = StatementArguments(known)
+            try db.execute(sql: "UPDATE fact SET episode_id = NULL WHERE episode_id IN (SELECT id FROM episode WHERE world_id NOT IN (\(ph)))", arguments: args)
+            try db.execute(sql: "DELETE FROM episode WHERE world_id NOT IN (\(ph))", arguments: args)
+            try db.execute(sql: "DELETE FROM world WHERE id NOT IN (\(ph))", arguments: args)
+        }
+
         return migrator
     }
 }
