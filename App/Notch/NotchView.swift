@@ -21,7 +21,6 @@ struct NotchView: View {
     var core: JarvisCore?
     var chat: ChatStore?
     var voice: VoiceController?
-    var meetings: MeetingService?
     @State private var isHovering = false
     @State private var isDropTargeted = false
     @State private var peekText: String?
@@ -48,7 +47,7 @@ struct NotchView: View {
         return voice.isActive && vm.state == .closed
     }
 
-    // Nudges / meeting / working bars and onboarding render on the primary
+    // Nudges / working bars and onboarding render on the primary
     // (built-in) display only. Making them follow the active display would mean
     // tracking the mouse continuously — exactly the idle-CPU cost Step 6 removed
     // — so the notch experience is deliberately anchored to the built-in notch.
@@ -70,8 +69,8 @@ struct NotchView: View {
     }
 
     /// Jarvis is doing work the closed notch should reflect: a foreground response
-    /// (rare while closed) OR a background run's Live Activity.
-    private var isBusy: Bool { agentWorking || chat?.liveActivity != nil }
+    /// (rare while closed) OR a background run's working status.
+    private var isBusy: Bool { agentWorking || chat?.backgroundStatus != nil }
 
     /// The notch is closed but Jarvis is busy (answering, or an unread proactive
     /// nudge is waiting): show a dim, slow border pulse so activity is visible
@@ -119,7 +118,7 @@ struct NotchView: View {
     private var morphAnimation: Animation {
         switch presentation {
         case .open, .onboarding: openAnimation
-        case .idle, .peek, .meeting, .working, .listening: closeAnimation
+        case .idle, .peek, .working, .listening: closeAnimation
         }
     }
 
@@ -136,24 +135,16 @@ struct NotchView: View {
         vm.state == .open ? NotchMetrics.cornerOpen.bottom : NotchMetrics.cornerClosed.bottom
     }
 
-    /// Live meeting indicator on the closed notch (primary display only, and
-    /// never while the voice chrome owns the bar).
-    private var showsMeetingBar: Bool {
-        isPrimary && vm.state == .closed && !showsListening && peekText == nil
-            && meetings?.isActive == true
-    }
-
-    /// Live Activity: Jarvis is working (usually a background run) while closed.
+    /// working status: Jarvis is working (usually a background run) while closed.
     private var showsWorkingBar: Bool {
-        isPrimary && vm.state == .closed && !showsListening && peekText == nil
-            && !showsMeetingBar && isBusy
+        isPrimary && vm.state == .closed && !showsListening && peekText == nil && isBusy
     }
 
     /// The single source of truth for what the notch is showing. Both the panel
     /// size (below) and the rendered content (`bodyContent`) derive from this one
     /// value via the same ladder, so they can never disagree. The ladder mirrors
     /// the old guard precedence exactly: onboarding → open → listening → peek →
-    /// meeting → working → idle.
+    /// working → idle.
     private var presentation: NotchPresentation {
         if showsOnboarding { return .onboarding }
         // Foreground working outranks .open so a follow-up collapses the panel
@@ -162,7 +153,6 @@ struct NotchView: View {
         if vm.state == .open { return .open(vm.selectedTab) }
         if showsListening, let voice { return .listening(voice.phase) }
         if let peekText, isPrimary { return .peek(peekText) }
-        if showsMeetingBar { return .meeting }
         if showsWorkingBar { return .working }
         return .idle
     }
@@ -249,7 +239,7 @@ struct NotchView: View {
             clippedBody
         }
         // One morph timeline: every discrete presentation change (open/close, tab
-        // switch, listening/peek/meeting/working) animates on a single spring, so
+        // switch, listening/peek/working) animates on a single spring, so
         // size, corner radii, and content stay locked together instead of racing
         // across ten separate implicit animations.
         .animation(morphAnimation, value: presentation)
@@ -348,15 +338,10 @@ struct NotchView: View {
             case .peek(let text):
                 ClosedPeekBar(text: text, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height, morphNamespace: morphNamespace)
                     .transition(.opacity)
-            case .meeting:
-                if let meetings {
-                    ClosedMeetingBar(meetings: meetings, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height, morphNamespace: morphNamespace)
-                        .transition(.opacity)
-                }
             case .working:
                 // Foreground status (thinking → tool → writing) when a live
-                // turn is running; the background Live Activity otherwise.
-                ClosedWorkingBar(activity: chat?.foregroundActivity ?? chat?.liveActivity,
+                // turn is running; the background working status otherwise.
+                ClosedWorkingBar(activity: chat?.foregroundStatus ?? chat?.backgroundStatus,
                                  cameraWidth: vm.closedNotchSize.width,
                                  cameraHeight: vm.closedNotchSize.height, morphNamespace: morphNamespace)
                     .transition(.opacity)
@@ -376,7 +361,16 @@ struct NotchView: View {
             if newState == .open {
                 chat?.notchDidOpen()   // start fresh if we've been idle past the gap
                 chat?.markProactiveRead()
+            } else {
+                chat?.notchDidClose()  // deliver anything held while interacting
             }
+        }
+        // Mode A: Jarvis has something to ask and the user is away — expand the
+        // notch (fresh session already prepared) so the question is front-and-center.
+        .onChange(of: chat?.proactiveOpenStamp) { _, _ in
+            guard isPrimary, vm.state == .closed, !showsListening else { return }
+            vm.selectedTab = .home
+            withAnimation(openAnimation) { vm.open() }
         }
         // Nudge peek: a fresh proactive message briefly expands the closed
         // notch with its first line (Dynamic Island grammar), then retracts.
@@ -429,7 +423,7 @@ struct NotchView: View {
                 Color.clear.frame(width: vm.closedNotchSize.width + NotchMetrics.headerCameraReserve)
                     .morphAnchor(MorphID.camera, in: morphNamespace, active: !reduceMotion)
                 HStack(spacing: 22) {
-                    tabButton(.activity)
+                    tabButton(.profile)
                     tabButton(.settings)
                 }
                 .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
@@ -463,7 +457,7 @@ struct NotchView: View {
             switch vm.selectedTab {
             case .home:
                 HomeView(
-                    chat: chat, voice: voice, meetings: meetings,
+                    chat: chat, voice: voice,
                     onBodyHeightChange: { bodyHeight in
                         // Grow the notch to fit the transcript (NotchViewModel
                         // caps at half the screen); ignore sub-4pt jitter.
@@ -482,13 +476,13 @@ struct NotchView: View {
                     },
                     openSegmentID: $historyOpenSegmentID
                 )
-            case .activity:
-                ActivityView(agent: chat.agent, knowledge: chat.memory, worlds: chat.worlds,
-                             graphReader: chat.graphReader,
-                             taskStore: TaskStore(database: core.database))
+            case .profile:
+                ProfileView(knowledge: chat.memory, graphReader: chat.graphReader,
+                            taskStore: TaskStore(database: core.database),
+                            database: core.database)
             case .settings:
                 SettingsView(core: core, screenBuffer: chat.agent.screenBuffer,
-                             knowledge: chat.memory)
+                             knowledge: chat.memory, worlds: chat.worlds)
             }
         } else {
             ProgressView().controlSize(.small)
@@ -548,73 +542,11 @@ private struct ClosedPeekBar: View {
     }
 }
 
-/// Closed-notch live-meeting indicator: pulsing dot + elapsed time flanking the
-/// camera. Tap (or hover) opens the panel as usual.
-private struct ClosedMeetingBar: View {
-    let meetings: MeetingService
-    let cameraWidth: CGFloat
-    let cameraHeight: CGFloat
-    let morphNamespace: Namespace.ID
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 5) {
-                PulsingDot(color: .jarvisError, animated: !reduceMotion)
-                Image(systemName: "waveform")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.75))
-            }
-            .frame(maxWidth: .infinity)
-            .morphAnchor(MorphID.leftFlank, in: morphNamespace, active: !reduceMotion)
-            Color.clear.frame(width: cameraWidth + NotchMetrics.cameraSideReserve)
-                .morphAnchor(MorphID.camera, in: morphNamespace, active: !reduceMotion)
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text(elapsed(at: context.date))
-                    .font(.system(size: 10, weight: .medium)).monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.75))
-            }
-            .frame(maxWidth: .infinity)
-            .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
-        }
-        .frame(height: cameraHeight)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Meeting being transcribed")
-    }
-
-    private func elapsed(at now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(meetings.activeSince ?? now)))
-        if seconds >= 3600 {
-            return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
-        }
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-}
-
-/// A recording-style dot that softly pulses (static under Reduce Motion).
-private struct PulsingDot: View {
-    let color: Color
-    let animated: Bool
-    @State private var dimmed = false
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 6, height: 6)
-            .opacity(dimmed ? 0.35 : 1)
-            .onAppear {
-                guard animated else { return }
-                withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) { dimmed = true }
-            }
-    }
-}
-
 /// Compact "thinking" bar: the status text shimmers Apple-Intelligence style
 /// below the camera while the animated edge glow breathes. No competing icons —
 /// the shimmer + glow carry the "working" signal.
 private struct ClosedWorkingBar: View {
-    var activity: ChatStore.LiveActivity?
+    var activity: ChatStore.WorkingStatus?
     let cameraWidth: CGFloat
     let cameraHeight: CGFloat
     let morphNamespace: Namespace.ID

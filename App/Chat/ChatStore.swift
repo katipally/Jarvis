@@ -98,13 +98,13 @@ final class ChatStore {
     var localFirst: LocalFirst?
 
     /// A glanceable "what Jarvis is doing right now" for the closed notch — the
-    /// notch's Live Activity. Set while a BACKGROUND run is in flight (foreground
+    /// notch's working status. Set while a BACKGROUND run is in flight (foreground
     /// runs show the open panel instead), updated per tool step, cleared on done.
-    struct LiveActivity: Equatable {
+    struct WorkingStatus: Equatable {
         var title: String
         var symbol: String
     }
-    var liveActivity: LiveActivity?
+    var backgroundStatus: WorkingStatus?
 
     /// Foreground working state: while true the notch shows the compact glowing
     /// working bar (status below the camera) instead of the open panel. Flips
@@ -113,29 +113,29 @@ final class ChatStore {
     var isWorkingCompact = false
     /// Live "what Jarvis is doing right now" for the FOREGROUND compact working
     /// bar, projected from the agent event stream (thinking → tool → writing).
-    var foregroundActivity: LiveActivity?
+    var foregroundStatus: WorkingStatus?
 
     /// Friendly, user-facing label for a tool while it runs — never the raw tool
-    /// name. Drives the notch Live Activity's per-step text. When the tool's
+    /// name. Drives the notch working status's per-step text. When the tool's
     /// input carries a concrete target (a query, url, title…), it's appended so
     /// the status reads "Reading the web: apple.com".
-    static func activityLabel(forTool name: String, input: JSONValue? = nil) -> LiveActivity {
-        let base: LiveActivity = switch name {
-        case "search_memory", "recall_screen": LiveActivity(title: "Recalling", symbol: "brain")
+    static func activityLabel(forTool name: String, input: JSONValue? = nil) -> WorkingStatus {
+        let base: WorkingStatus = switch name {
+        case "search_memory", "recall_screen": WorkingStatus(title: "Recalling", symbol: "brain")
         case "search_screen", "fetch_frames", "take_screenshot", "ui_snapshot":
-            LiveActivity(title: "Reviewing your screen", symbol: "eye")
-        case "calendar_list", "calendar_add_event": LiveActivity(title: "Checking your calendar", symbol: "calendar")
-        case "reminders_list", "reminders_add": LiveActivity(title: "Checking reminders", symbol: "checklist.checked")
-        case "mail_send": LiveActivity(title: "Drafting mail", symbol: "envelope")
-        case "notes_create": LiveActivity(title: "Writing a note", symbol: "note.text")
-        case "fetch_url", "open_url": LiveActivity(title: "Reading the web", symbol: "globe")
-        case "web_search", "search_web": LiveActivity(title: "Searching the web", symbol: "globe")
+            WorkingStatus(title: "Reviewing your screen", symbol: "eye")
+        case "calendar_list", "calendar_add_event": WorkingStatus(title: "Checking your calendar", symbol: "calendar")
+        case "reminders_list", "reminders_add": WorkingStatus(title: "Checking reminders", symbol: "checklist.checked")
+        case "mail_send": WorkingStatus(title: "Drafting mail", symbol: "envelope")
+        case "notes_create": WorkingStatus(title: "Writing a note", symbol: "note.text")
+        case "fetch_url", "open_url": WorkingStatus(title: "Reading the web", symbol: "globe")
+        case "web_search", "search_web": WorkingStatus(title: "Searching the web", symbol: "globe")
         case "schedule_task", "list_scheduled_tasks", "cancel_scheduled_task":
-            LiveActivity(title: "Managing your schedule", symbol: "clock")
-        default: LiveActivity(title: "Working", symbol: "sparkles")
+            WorkingStatus(title: "Managing your schedule", symbol: "clock")
+        default: WorkingStatus(title: "Working", symbol: "sparkles")
         }
         guard let target = toolTarget(input) else { return base }
-        return LiveActivity(title: "\(base.title): \(target)", symbol: base.symbol)
+        return WorkingStatus(title: "\(base.title): \(target)", symbol: base.symbol)
     }
 
     /// Best-effort concrete target from a tool's JSON input, truncated so the
@@ -151,10 +151,6 @@ final class ChatStore {
         }
         return nil
     }
-    /// Rendered Active-facet lines ("how the user likes things"), maintained by
-    /// ConsciousnessService after each rebuild; rides in the per-turn context.
-    var facets: String?
-
     var messages: [DisplayMessage] = []
     var attachments: [Attachment] = []
     var input: String = ""
@@ -170,6 +166,14 @@ final class ChatStore {
     /// peek the message inline (Dynamic Island style).
     private(set) var latestProactiveText: String?
     private(set) var proactiveStamp = 0
+    /// Whether the user is actively in the notch (panel open). Mirrored from
+    /// NotchView. Drives the two proactive-delivery modes: while open, Jarvis
+    /// holds a proactive message rather than interrupting; it's delivered after
+    /// the notch closes.
+    var notchIsOpen = false
+    /// Bumped when a held proactive message is ready to be shown in a fresh
+    /// session — NotchView opens the panel in response (Mode A: user was away).
+    private(set) var proactiveOpenStamp = 0
 
     private var transcript: [NeutralMessage] = []
     private var pendingToolResults: [ContentBlock] = []
@@ -180,7 +184,10 @@ final class ChatStore {
     private var workingStartedAt: Date?
     private var expandTask: Task<Void, Never>?
     private var lastUserText: String?
-    private var queuedProactive: [String] = []
+    /// Proactive messages held because the user is busy (mid-run or in the notch).
+    /// Flushed a few seconds after they stop interacting.
+    private var pendingProactive: [String] = []
+    private var proactiveFlushTask: Task<Void, Never>?
 
     // Home shows ONLY the current conversation. Older/closed conversations live
     // in the History tab and never scroll into this view.
@@ -283,7 +290,7 @@ final class ChatStore {
         expandTask?.cancel()
         isWorkingCompact = true
         workingStartedAt = .now
-        foregroundActivity = LiveActivity(title: "Thinking", symbol: "sparkles")
+        foregroundStatus = WorkingStatus(title: "Thinking", symbol: "sparkles")
         activeAssistantID = nil
         pendingToolResults = []
 
@@ -308,7 +315,7 @@ final class ChatStore {
         var usage = Usage()
 
         runTask = Task { [weak self] in
-            await runStore.createRun(id: runID, kind: "foreground", segmentID: nil, initiator: "user")
+            await runStore.createRun(id: runID, kind: "chat", segmentID: nil, initiator: "user")
             let turn = try? await sessions.beginUserTurn()
             if turn?.startedNewSegment == true {
                 // Fresh segment = fresh context; the closed segment's content is
@@ -326,7 +333,7 @@ final class ChatStore {
             // in the user turn so the system prompt stays byte-stable for caching.
             let memoryContext = await memory?.context(for: userText)
             let userMessage = NeutralMessage.user(
-                Self.contextBlock(memory: memoryContext, facets: self?.facets) + "\n\n" + userText,
+                Self.contextBlock(memory: memoryContext) + "\n\n" + userText,
                 images: images
             )
             guard let self else { return }
@@ -351,12 +358,12 @@ final class ChatStore {
                     // expand to the streaming answer (after a short minimum so
                     // the working state is always seen, even for fast replies).
                     if self.isWorkingCompact {
-                        self.foregroundActivity = LiveActivity(title: "Writing answer", symbol: "pencil")
+                        self.foregroundStatus = WorkingStatus(title: "Writing answer", symbol: "pencil")
                         self.expandFromWorking()
                     }
                     self.appendToAssistant(t, thinking: false)
                 case .thinkingDelta(let t):
-                    self.foregroundActivity = LiveActivity(title: "Thinking", symbol: "sparkles")
+                    self.foregroundStatus = WorkingStatus(title: "Thinking", symbol: "sparkles")
                     self.appendToAssistant(t, thinking: true)
                 case .assistantMessage(let m):
                     await self.flushPendingToolResults(runID: runID)
@@ -369,7 +376,7 @@ final class ChatStore {
                                                        runId: runID, model: model, provider: providerLabel)
                     }
                 case .toolCallStarted(let id, let name, let input):
-                    self.foregroundActivity = Self.activityLabel(forTool: name, input: input)
+                    self.foregroundStatus = Self.activityLabel(forTool: name, input: input)
                     self.messages.append(DisplayMessage(id: id, role: .tool, toolName: name, toolState: .running))
                     await runStore.toolStarted(id: id, runID: runID, name: name, input: input)
                 case .toolCallFinished(let id, let output, let isError, let artifactID):
@@ -427,7 +434,7 @@ final class ChatStore {
             // Leave the compact working state so the panel settles on the answer.
             self.expandTask?.cancel()
             self.isWorkingCompact = false
-            self.foregroundActivity = nil
+            self.foregroundStatus = nil
             self.deliverQueuedProactive()
             if !interrupted { self.onRunComplete?() }
             self.memory?.turnCompleted() // debounced memory extraction after each user turn
@@ -483,6 +490,8 @@ final class ChatStore {
     /// gap, the previous conversation is stale — start a fresh one so opening
     /// after a break lands on a clean chat (not stuck in the old one).
     func notchDidOpen() {
+        notchIsOpen = true
+        proactiveFlushTask?.cancel()   // the user is here — don't deliver held nudges yet
         guard phase == .idle, !messages.isEmpty else { return }
         let gap = TimeInterval(max(1, core.sessionGapMinutes) * 60)
         if Date.now.timeIntervalSince(lastInteraction) > gap {
@@ -520,7 +529,7 @@ final class ChatStore {
         return f
     }()
 
-    private static func contextBlock(memory: String?, facets: String? = nil) -> String {
+    private static func contextBlock(memory: String?) -> String {
         var lines = ["<context>"]
         lines.append("Now: \(contextDateFormatter.string(from: .now)) (\(TimeZone.current.identifier))")
         if let app = NSWorkspace.shared.frontmostApplication?.localizedName {
@@ -528,9 +537,6 @@ final class ChatStore {
         }
         if let memory, !memory.isEmpty {
             lines.append(memory)
-        }
-        if let facets, !facets.isEmpty {
-            lines.append(facets)
         }
         lines.append("</context>")
         return lines.joined(separator: "\n")
@@ -586,9 +592,9 @@ final class ChatStore {
     func oneShotAnswer(_ question: String) async -> String {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return "Ask me something." }
-        // Show a notch Live Activity while answering an ambient (Siri/Spotlight) ask.
-        liveActivity = LiveActivity(title: "Thinking", symbol: "sparkles")
-        defer { liveActivity = nil }
+        // Show a notch working status while answering an ambient (Siri/Spotlight) ask.
+        backgroundStatus = WorkingStatus(title: "Thinking", symbol: "sparkles")
+        defer { backgroundStatus = nil }
         let recalled = await memory?.context(for: q) ?? nil
         let system = Self.systemPrompt + (recalled.map { "\n\n<context>\n\($0)\n</context>" } ?? "")
         return await localFirst?.text(instructions: system, prompt: q, maxTokens: 800)
@@ -599,22 +605,57 @@ final class ChatStore {
     func removeAttachment(_ id: String) { attachments.removeAll { $0.id == id } }
 
     /// Jarvis-initiated message (nudge, cron brief, heartbeat). Appears in chat + glows the notch.
-    /// Queued while a run is streaming — splicing an assistant message between a
-    /// tool_use and its results would corrupt the transcript.
+    /// Two delivery modes:
+    ///  • The user is AWAY (notch closed, no run) → present now: a fresh session
+    ///    opens with the message so Jarvis can ask its question (Mode A).
+    ///  • The user is BUSY (mid-run, or reading/typing in the open notch) → hold
+    ///    it and deliver a few seconds after they close the notch (Mode B), so
+    ///    Jarvis never talks over an active conversation.
     func receiveProactive(_ body: String) {
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        if phase == .responding {
-            queuedProactive.append(text)
+        if phase == .responding || notchIsOpen {
+            pendingProactive.append(text)   // busy → hold (Mode B)
             return
         }
-        deliverProactive(text)
+        presentProactive(text)              // away → show now (Mode A)
     }
 
+    /// Mode A: surface a proactive message in a clean session and ask the notch
+    /// to expand. Starting fresh keeps the question from being buried in a stale
+    /// conversation the user walked away from.
+    private func presentProactive(_ text: String) {
+        if !messages.isEmpty { newSession() }
+        deliverProactive(text)
+        proactiveOpenStamp += 1
+    }
+
+    /// The notch just closed: after a short delay (so a reopen cancels it),
+    /// deliver anything held while the user was interacting (Mode B tail).
+    func notchDidClose() {
+        notchIsOpen = false
+        proactiveFlushTask?.cancel()
+        guard !pendingProactive.isEmpty else { return }
+        proactiveFlushTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard let self, !Task.isCancelled, !self.notchIsOpen, self.phase == .idle else { return }
+            self.flushPendingProactive()
+        }
+    }
+
+    private func flushPendingProactive() {
+        guard !pendingProactive.isEmpty else { return }
+        // Collapse everything held into one delivery so a batch doesn't spam.
+        let text = pendingProactive.joined(separator: "\n\n")
+        pendingProactive = []
+        presentProactive(text)
+    }
+
+    /// A run finished. If the user isn't in the notch, deliver anything queued
+    /// during the run; otherwise keep holding until they close it.
     private func deliverQueuedProactive() {
-        guard phase == .idle else { return }
-        for text in queuedProactive { deliverProactive(text) }
-        queuedProactive = []
+        guard phase == .idle, !notchIsOpen else { return }
+        flushPendingProactive()
     }
 
     /// Follow up on a proactive nudge ("Tell me more") — sends a message and
@@ -767,7 +808,7 @@ final class ChatStore {
         // Expand out of the compact working bar immediately so the partial
         // answer (whatever streamed so far) is shown, not the collapsed bar.
         isWorkingCompact = false
-        foregroundActivity = nil
+        foregroundStatus = nil
         if let id = activeAssistantID {
             mutate(id) {
                 $0.isStreaming = false
