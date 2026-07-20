@@ -94,15 +94,3 @@ public struct SegmentDigest: Sendable {
     public var summary: String
 }
 
-/// Structured summary of a finished meeting.
-@Generable
-public struct MeetingSummary: Sendable {
-    @Guide(description: "A concise Title Case title for the meeting, at most 8 words.")
-    public var title: String
-    @Guide(description: "A short paragraph overview of what was discussed and decided.")
-    public var overview: String
-    @Guide(description: "Concrete action items with owners if stated. Empty if none.")
-    public var actionItems: [String]
-    @Guide(description: "Durable facts about the user or their world worth remembering. Empty if none.")
-    public var keyFacts: [String]
-}

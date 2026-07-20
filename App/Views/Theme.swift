@@ -15,12 +15,10 @@ enum NotchAnimation {
 enum NotchMetrics {
     /// Notch size on displays without a physical notch.
     static let fallbackClosedSize = CGSize(width: 185, height: 32)
-    /// Gap flanking the camera housing in the compact bars (listening/peek/meeting/working).
+    /// Gap flanking the camera housing in the compact bars (listening/peek/working).
     static let cameraSideReserve: CGFloat = 22
     /// Central void reserved for the camera in the open tab header.
     static let headerCameraReserve: CGFloat = 28
-    /// Width added to the closed notch for the slim status bar (meeting).
-    static let statusExtraWidth: CGFloat = 150
     /// Width/height added to the closed notch for the listening chrome. Just
     /// enough for a small waveform hugging the left of the camera and a mic
     /// hugging the right, plus a one-line transcript below.

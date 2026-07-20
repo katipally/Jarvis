@@ -6,7 +6,6 @@ import SwiftUI
 struct HomeView: View {
     @Bindable var chat: ChatStore
     var voice: VoiceController?
-    var meetings: MeetingService?
     /// Reports the height the transcript wants so the notch grows to fit it,
     /// capped by the view model. Home is a plain chat: the full session history,
     /// newest at the bottom, auto-growing to fit then scrolling.
@@ -42,13 +41,6 @@ struct HomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let meetings, meetings.isActive {
-                MeetingTranscriptCard(appName: meetings.activeAppName, lines: meetings.lines) {
-                    meetings.stopMeeting()
-                }
-                .padding(.bottom, 8)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
             transcript
             // Transient composing accessories (pending attachments + the single
             // error surface). The composer itself is the floating glass tray

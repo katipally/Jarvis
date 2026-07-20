@@ -16,9 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var knowledgeStore: KnowledgeStore?
     private var knowledge: KnowledgeService?
     private var worldSync: WorldSyncEngine?
-    private var mind: ConsciousnessService?
+    private var awareness: Awareness?
     private var notifications: NotificationService?
-    private var meetings: MeetingService?
     private var sessions: SessionManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -45,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let knowledgeStore = KnowledgeStore(database: database)
 
             // One shared on-device model + resolver + task store, used by
-            // knowledge, proactivity, and meetings (local-first, API optional).
+            // knowledge and proactivity (local-first, API optional).
             let localFirst = LocalFirst(local: LocalModel(), core: core)
             let taskStore = TaskStore(database: database)
 
@@ -97,44 +96,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             // The decision engine: heartbeat reflection + trigger pipeline +
-            // staged delivery + facet learning. Every verdict is logged.
+            // staged delivery. Every verdict is logged.
             let notifications = NotificationService()
             notifications.onActivate = { NSApp.activate(ignoringOtherApps: true) }
-            let mind = ConsciousnessService(
+            let awareness = Awareness(
                 core: core, chat: chat, agent: agent,
                 localFirst: localFirst, tasks: taskStore, notifications: notifications,
                 knowledge: knowledge, database: database)
-            self.mind = mind
+            self.awareness = awareness
             self.notifications = notifications
             agent.screenBuffer.onContextSwitch = { frame in
-                Task { @MainActor in mind.onContextSwitch(frame) }
+                Task { @MainActor in awareness.onContextSwitch(frame) }
             }
-            worldSync.mind = mind
-            knowledge.onFactsIngested = { facts in mind.factsExtracted(facts) }
+            worldSync.awareness = awareness
 
-            // Meeting transcription (opt-in): conferencing-gated capture → summary.
-            let meetings = MeetingService(
-                database: database, localFirst: localFirst, taskStore: taskStore,
-                settings: core.settings,
-                receiveProactive: { body in chat.receiveProactive(body) },
-                ingestFact: { fact in
-                    // Meeting key facts are model-generated, so they clear the
-                    // same durability gate as extraction (explicit `remember`
-                    // commands don't — a direct user instruction always wins).
-                    guard FactValidator.isDurable(fact) else { return }
-                    await knowledge.remember(fact)
-                })
-            self.meetings = meetings
-
-            screenManager.start(core: core, chat: chat, voice: voice, meetings: meetings)
+            screenManager.start(core: core, chat: chat, voice: voice)
             pushToTalk.start()
             Task {
                 let policy = await ScreenCapturePolicy.load(from: core.settings)
                 agent.screenBuffer.setPolicy(policy)
                 agent.screenBuffer.start() // no-op until Screen Recording is granted
             }
-            mind.start()
-            meetings.start()
+            awareness.start()
             Task {
                 let muted = ((try? await core.settings.get("proactive_muted", as: Bool.self)) ?? nil) ?? false
                 if !muted { notifications.requestAuth() }

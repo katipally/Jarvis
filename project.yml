@@ -46,7 +46,6 @@ targets:
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Jarvis uses the microphone for voice input when you hold Option to talk."
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Jarvis transcribes your voice on-device to understand what you say."
-        INFOPLIST_KEY_NSAudioCaptureUsageDescription: "Jarvis captures system audio to transcribe meetings on-device when you enable meeting capture."
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: "Jarvis reads and adds calendar events when you ask it to."
         INFOPLIST_KEY_NSContactsUsageDescription: "Jarvis reads your contacts to recognize the people in your life."
         INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: "Jarvis reads and adds reminders when you ask it to."

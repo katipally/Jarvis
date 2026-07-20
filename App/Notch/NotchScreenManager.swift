@@ -28,7 +28,6 @@ final class NotchScreenManager {
     private var core: JarvisCore?
     private var chat: ChatStore?
     private var voice: VoiceController?
-    private var meetings: MeetingService?
 
     /// Lock-free-enough throttle usable from the monitor callback thread.
     private final class PointerThrottle: @unchecked Sendable {
@@ -54,11 +53,10 @@ final class NotchScreenManager {
         "com.apple.accessibility.universalAccessAuthWarn",
     ]
 
-    func start(core: JarvisCore, chat: ChatStore, voice: VoiceController, meetings: MeetingService? = nil) {
+    func start(core: JarvisCore, chat: ChatStore, voice: VoiceController) {
         self.core = core
         self.chat = chat
         self.voice = voice
-        self.meetings = meetings
         rebuild()
 
         // A clicked proactive notification opens the primary panel.
@@ -207,7 +205,7 @@ final class NotchScreenManager {
             backing: .buffered,
             defer: false
         )
-        let root = NotchView(vm: vm, core: core, chat: chat, voice: voice, meetings: meetings)
+        let root = NotchView(vm: vm, core: core, chat: chat, voice: voice)
         window.contentView = NotchHostingView(rootView: root)
         vm.attach(window: window)
         vm.onStateChange = { [weak self] in self?.updateMouseMonitors() }

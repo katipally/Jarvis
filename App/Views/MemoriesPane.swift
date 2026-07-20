@@ -188,7 +188,6 @@ struct MemoriesPane: View {
         if s.contains("contact") { return "person.crop.circle" }
         if s.contains("brows") { return "safari" }
         if s.contains("screen") { return "eye" }
-        if s.contains("meeting") { return "waveform" }
         if s.contains("chat") || s.contains("convers") { return "bubble.left" }
         return "sparkles"
     }

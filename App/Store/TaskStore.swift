@@ -36,15 +36,6 @@ struct TaskStore: Sendable {
         }) ?? []
     }
 
-    func openCommitments() async -> [CommitmentRow] {
-        (try? await database.reader.read { db in
-            try CommitmentRow
-                .filter(Column("status") == CommitmentRow.Status.open.rawValue)
-                .order(Column("due_at"))
-                .fetchAll(db)
-        }) ?? []
-    }
-
     func setCommitmentStatus(_ id: String, _ status: CommitmentRow.Status) async {
         _ = try? await database.writer.write { db in
             try db.execute(sql: "UPDATE commitment SET status = ? WHERE id = ?",
