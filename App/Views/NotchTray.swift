@@ -27,7 +27,7 @@ struct NotchTray: View {
     @State private var stopDimmed = false
 
     var body: some View {
-        GlassEffectContainer {
+        Group {
             switch mode {
             case .composer: composer
             case .backToLatest:
@@ -95,8 +95,7 @@ struct NotchTray: View {
         .padding(.leading, 16)
         .padding(.trailing, 6)
         .padding(.vertical, 6)
-        .glassEffect(.regular, in: .capsule)
-        .frame(maxWidth: .infinity)
+        .trayGlass()
         .onAppear { inputFocused = true }
     }
 
@@ -118,7 +117,7 @@ struct NotchTray: View {
             .foregroundStyle(.primary)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .glassEffect(.regular, in: .capsule)
+            .trayGlass()
             .opacity(stopDimmed ? 0.6 : 1)
             .contentShape(Capsule())
         }
@@ -146,12 +145,23 @@ struct NotchTray: View {
             .foregroundStyle(.primary)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .glassEffect(.regular, in: .capsule)
+            .trayGlass()
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
         .keyboardShortcut(.cancelAction)
         .accessibilityLabel(label)
+    }
+}
+
+private extension View {
+    /// Apple-style Liquid Glass capsule with a crisp adaptive rim + a soft float
+    /// shadow, so the pill reads clearly over any desktop (the bare glassEffect
+    /// edge is too faint on dark backgrounds — the "blends in" complaint).
+    func trayGlass() -> some View {
+        glassEffect(.regular, in: .capsule)
+            .overlay(Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.32), radius: 12, y: 5)
     }
 }

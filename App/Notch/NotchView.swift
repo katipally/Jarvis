@@ -195,7 +195,7 @@ struct NotchView: View {
                     onBackToLatest: { returnToLatestSignal += 1 },
                     onContinue: continueOpenHistory
                 )
-                .frame(width: max(displayedSize.width - 8, 220))
+                .frame(width: trayWidth)
                 .offset(y: displayedSize.height + NotchMetrics.trayGap)
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .zIndex(0)
@@ -209,6 +209,12 @@ struct NotchView: View {
         .animation(morphAnimation, value: presentation)
         .animation(tabAnimation, value: vm.homeBodyHeight)
         .preferredColorScheme(.dark)
+    }
+
+    /// A compact floating pill, comfortably narrower than the panel — never the
+    /// full body width (which read as "way bigger than the notch").
+    private var trayWidth: CGFloat {
+        min(displayedSize.width - 24, 380)
     }
 
     private func continueOpenHistory() {

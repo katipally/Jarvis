@@ -175,6 +175,10 @@ final class ChatStore {
     private var pendingToolResults: [ContentBlock] = []
     private var activeAssistantID: String?
     private var runTask: Task<Void, Never>?
+    /// When the compact working bar appeared, + the task that expands out of it
+    /// after a minimum visible duration.
+    private var workingStartedAt: Date?
+    private var expandTask: Task<Void, Never>?
     private var lastUserText: String?
     private var queuedProactive: [String] = []
 
@@ -278,7 +282,9 @@ final class ChatStore {
         phase = .responding
         // Enter the compact glowing working state; it flips to the expanded
         // answer at the first token of prose (see .textDelta below).
+        expandTask?.cancel()
         isWorkingCompact = true
+        workingStartedAt = .now
         foregroundActivity = LiveActivity(title: "Thinking", symbol: "sparkles")
         activeAssistantID = nil
         pendingToolResults = []
@@ -338,10 +344,11 @@ final class ChatStore {
                     break
                 case .textDelta(let t):
                     // First prose token: leave the compact working bar and
-                    // expand to the streaming answer.
+                    // expand to the streaming answer (after a short minimum so
+                    // the working state is always seen, even for fast replies).
                     if self.isWorkingCompact {
-                        self.isWorkingCompact = false
                         self.foregroundActivity = LiveActivity(title: "Writing answer", symbol: "pencil")
+                        self.expandFromWorking()
                     }
                     self.appendToAssistant(t, thinking: false)
                 case .thinkingDelta(let t):
@@ -414,6 +421,7 @@ final class ChatStore {
             guard let self else { return }
             self.phase = .idle
             // Leave the compact working state so the panel settles on the answer.
+            self.expandTask?.cancel()
             self.isWorkingCompact = false
             self.foregroundActivity = nil
             self.deliverQueuedProactive()
@@ -645,10 +653,25 @@ final class ChatStore {
         mutate(activeAssistantID!) { thinking ? ($0.thinking += text) : ($0.text += text) }
     }
 
+    /// Leave the compact working bar, but keep it visible for a short minimum so
+    /// it's always perceptible (fast replies would otherwise skip it entirely).
+    private func expandFromWorking() {
+        guard isWorkingCompact else { return }
+        let minCompact: TimeInterval = 0.5
+        let elapsed = workingStartedAt.map { Date.now.timeIntervalSince($0) } ?? minCompact
+        guard elapsed < minCompact else { isWorkingCompact = false; return }
+        expandTask?.cancel()
+        expandTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(minCompact - elapsed))
+            guard !Task.isCancelled else { return }
+            self?.isWorkingCompact = false
+        }
+    }
+
     private func finalizeAssistant(_ message: NeutralMessage) {
         // Providers that don't stream prose deltas still need to leave the
         // compact working bar and expand to the finished answer.
-        if isWorkingCompact, !message.plainText.isEmpty { isWorkingCompact = false }
+        if isWorkingCompact, !message.plainText.isEmpty { expandFromWorking() }
         if let id = activeAssistantID {
             mutate(id) { $0.text = message.plainText; $0.isStreaming = false }
             activeAssistantID = nil
