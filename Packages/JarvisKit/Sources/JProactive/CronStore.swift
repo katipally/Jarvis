@@ -40,7 +40,7 @@ public struct CronStore: Sendable {
     }
 
     /// Upserts a reserved builtin job (e.g. "builtin:morning_brief") with the
-    /// given schedule. The prompt is empty — ProactivityService composes the
+    /// given schedule. The prompt is empty — Awareness composes the
     /// body itself when a builtin id comes due. Re-runnable each launch: only
     /// recomputes the next fire when the expression actually changed, so an
     /// unchanged brief keeps its place in the schedule across relaunches.

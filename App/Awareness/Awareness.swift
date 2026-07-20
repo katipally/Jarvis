@@ -9,7 +9,7 @@ import JProactive
 import JScreen
 import JStore
 
-/// The decision engine ("consciousness"), replacing the old ProactivityService.
+/// Awareness — Jarvis's single proactive engine (`observe → reflect → decide`).
 /// Two paths, both defaulting to silence (openhuman's model):
 ///
 ///   HEARTBEAT — periodic tick → per-world diff since checkpoint → nothing
@@ -22,13 +22,12 @@ import JStore
 ///   escalate, bias drop) → sliding-hour promotion budget (downgrade, never
 ///   discard) → serial queue → background run and/or notify.
 ///
-/// Plus a 60s staged-delivery loop (meetings heads_up/final_call/starting_now,
-/// commitments soon/due, content-key sent-dedup) and the facet learning system
-/// (scored decaying preferences fed back into the prompt).
+/// Plus a 60s staged-delivery loop (calendar meetings heads_up/final_call/
+/// starting_now, commitments soon/due, content-key sent-dedup).
 ///
 /// EVERY verdict — including "stayed quiet" — lands in the decision table.
 @MainActor
-final class ConsciousnessService {
+final class Awareness {
     private let core: JarvisCore
     private let chat: ChatStore
     private let agent: AgentServices
@@ -46,8 +45,6 @@ final class ConsciousnessService {
     private var cronTask: Task<Void, Never>?
     private var deliveryTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
-    private var facetTask: Task<Void, Never>?
-    private var facetDebounce: Task<Void, Never>?
     /// Global context-switch throttle (the tiny triage model must not run on
     /// every Cmd-Tab of a fast multitasking burst).
     private var lastSwitchEval = Date.distantPast
@@ -88,7 +85,7 @@ final class ConsciousnessService {
             guard let self else { return }
             // Mark the dismissed nudge — maybeNudge derives its backoff
             // multiplier from recent dismissals, so this has a mechanical
-            // effect on cadence, not just a facet note.
+            // effect on cadence.
             Task {
                 _ = try? await self.database.writer.write { db in
                     try db.execute(sql: """
@@ -97,16 +94,10 @@ final class ConsciousnessService {
                         """)
                 }
             }
-            // And it is Behavioral evidence that notifications should be rarer.
-            self.addEvidence([FacetEvidence(
-                class: .channel, key: "channel/notifications", value: "fewer",
-                cue: .behavioral, evidenceRef: "dismiss:\(Int(Date.now.timeIntervalSince1970))",
-                observedAt: .now)])
         }
         Task { [weak self] in
             await self?.loadBudget()
             await self?.reloadConfig()
-            await self?.rebuildFacets()
         }
         cronTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -134,16 +125,10 @@ final class ConsciousnessService {
                 try? await Task.sleep(for: .seconds(self?.heartbeatInterval ?? 600))
             }
         }
-        facetTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(30 * 60))
-                await self?.rebuildFacets()
-            }
-        }
     }
 
     func stop() {
-        for task in [cronTask, deliveryTask, heartbeatTask, facetTask, facetDebounce] { task?.cancel() }
+        for task in [cronTask, deliveryTask, heartbeatTask] { task?.cancel() }
     }
 
     // MARK: - Config
@@ -596,84 +581,6 @@ final class ConsciousnessService {
         chat.receiveProactive(clean)
     }
 
-    // MARK: - Facet learning
-
-    /// Called by KnowledgeService when new facts land: explicit-preference cues.
-    func factsExtracted(_ facts: [(id: String, text: String)]) {
-        addEvidence(FacetCues.explicitCandidates(fromFacts: facts))
-    }
-
-    func addEvidence(_ items: [FacetEvidence]) {
-        guard !items.isEmpty else { return }
-        Task {
-            _ = try? await database.writer.write { db in
-                for item in items {
-                    try FacetEvidenceRow(class: item.class.rawValue, key: item.key, value: item.value,
-                                         cue: item.cue.rawValue, evidenceRef: item.evidenceRef,
-                                         observedAt: item.observedAt).insert(db, onConflict: .ignore)
-                }
-            }
-            scheduleFacetRebuild()
-        }
-    }
-
-    private func scheduleFacetRebuild() {
-        facetDebounce?.cancel()
-        facetDebounce = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(60))
-            guard !Task.isCancelled else { return }
-            await self?.rebuildFacets()
-        }
-    }
-
-    func rebuildFacets() async {
-        let now = Date.now
-        let (evidence, userStates) = (try? await database.reader.read { db -> ([FacetEvidence], [String: FacetUserState]) in
-            let rows = try FacetEvidenceRow.fetchAll(db)
-            let evidence = rows.compactMap { row -> FacetEvidence? in
-                guard let klass = FacetClass(rawValue: row.class),
-                      let cue = CueFamily(rawValue: row.cue) else { return nil }
-                return FacetEvidence(class: klass, key: row.key, value: row.value, cue: cue,
-                                     evidenceRef: row.evidenceRef, observedAt: row.observedAt)
-            }
-            let states = try FacetRow.fetchAll(db)
-            let userStates = Dictionary(uniqueKeysWithValues: states.compactMap { row -> (String, FacetUserState)? in
-                guard let state = FacetUserState(rawValue: row.userState), state != .auto else { return nil }
-                return (row.key, state)
-            })
-            return (evidence, userStates)
-        }) ?? ([], [:])
-
-        let results = FacetEngine.rebuild(evidence: evidence, userStates: userStates, now: now)
-
-        _ = try? await database.writer.write { db in
-            // Replace auto rows wholesale; keep non-auto user_state markers.
-            let userStateByKey = Dictionary(uniqueKeysWithValues:
-                try FacetRow.fetchAll(db).map { ($0.key, $0.userState) })
-            try db.execute(sql: "DELETE FROM facet WHERE user_state = 'auto'")
-            for result in results {
-                var row = FacetRow(
-                    key: result.key, class: result.class.rawValue, value: result.value,
-                    state: result.state.rawValue,
-                    stability: min(result.stability, 1e12), // ∞ (pinned) is not SQLite-storable
-                    evidenceCount: result.evidenceCount,
-                    firstSeenAt: result.firstSeenAt, lastSeenAt: result.lastSeenAt)
-                row.userState = userStateByKey[result.key] ?? "auto"
-                try row.upsert(db)
-            }
-            // Evidence hygiene: mark consumed, prune ancient rows — but never
-            // a pinned facet's evidence (pinned means "keep forever", and the
-            // engine can only surface keys that still have evidence).
-            try db.execute(sql: "UPDATE facet_evidence SET consumed_at = ? WHERE consumed_at IS NULL", arguments: [now])
-            try db.execute(sql: """
-                DELETE FROM facet_evidence WHERE observed_at < ?
-                AND key NOT IN (SELECT key FROM facet WHERE user_state = 'pinned')
-                """, arguments: [now.addingTimeInterval(-180 * 86400)])
-        }
-
-        chat.facets = FacetEngine.promptSection(results)
-    }
-
     // MARK: - Background runs (carried over)
 
     private static let backgroundSystem = """
@@ -686,10 +593,10 @@ final class ConsciousnessService {
         let runID = UUID().uuidString
         let runStore = agent.runStore
         await runStore.createRun(id: runID, kind: kind, segmentID: nil, initiator: "jarvis", label: label)
-        // Notch Live Activity: show that Jarvis is working in the background, and
+        // Notch working status: show that Jarvis is working in the background, and
         // refine the label as each tool runs. Cleared on exit no matter how we return.
-        chat.liveActivity = ChatStore.LiveActivity(title: "Thinking", symbol: "sparkles")
-        defer { chat.liveActivity = nil }
+        chat.backgroundStatus = ChatStore.WorkingStatus(title: "Thinking", symbol: "sparkles")
+        defer { chat.backgroundStatus = nil }
         let loop = AgentLoop(
             adapter: resolved.adapter, tools: agent.tools, gate: agent.gate,
             config: .init(model: resolved.model, system: Self.backgroundSystem, effort: resolved.effort,
@@ -701,7 +608,7 @@ final class ConsciousnessService {
             switch event {
             case .assistantMessage(let m) where !m.plainText.isEmpty: text = m.plainText
             case .toolCallStarted(let id, let name, let input):
-                chat.liveActivity = ChatStore.activityLabel(forTool: name)
+                chat.backgroundStatus = ChatStore.activityLabel(forTool: name)
                 await runStore.toolStarted(id: id, runID: runID, name: name, input: input)
             case .toolCallFinished(let id, let output, let isError, let artifactID):
                 await runStore.toolFinished(id: id, state: isError ? "error" : "done", preview: output, artifactID: artifactID)
@@ -757,9 +664,11 @@ final class ConsciousnessService {
     something the user would want to know right now.
     """
     private static let criticInstructions = """
-    You are the last gate before Jarvis interrupts the user. Approve ONLY if the message \
-    tells them something genuinely new and useful they don't already know and would want \
-    right now. Most proposals should be rejected. Default to not approving.
+    You are the last gate before Jarvis speaks up. Approve when the message tells the user \
+    something genuinely useful, timely, or worth a quick heads-up that they'd be glad to see — \
+    a real deadline, a helpful catch, a good opportunity. Reject only filler, the obvious, \
+    or things that can clearly wait. Aim for a few good messages a day: noticeable but polite, \
+    never chatty. When it's a close call and the message is genuinely helpful, approve it.
     """
     private static let briefInstructions = """
     Write a short, warm morning brief from these facts — 2-4 sentences. Lead with what \
