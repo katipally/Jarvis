@@ -1,55 +1,112 @@
 import JMemory
 import SwiftUI
 
-/// Force-directed knowledge-graph explorer rendered with Canvas. Simple spring
-/// layout run on a timer; tap a node to highlight its relations.
+/// Force-directed knowledge-graph explorer rendered with Canvas. Pan (drag the
+/// background), zoom (pinch), drag nodes, search to highlight, and tap a node
+/// to inspect it — its relations plus the memories it appears in.
 struct GraphView: View {
     let reader: GraphReader
+    var memoryStore: MemoryStore?
 
     @State private var snapshot = GraphReader.Snapshot(nodes: [], edges: [])
     @State private var positions: [String: CGPoint] = [:]
     @State private var velocities: [String: CGVector] = [:]
     @State private var selected: String?
+    @State private var relatedMemories: [RetrievedMemory] = []
     @State private var includeHistory = false
     @State private var layout: Task<Void, Never>?
+    @State private var query = ""
+
+    // View transform: world (simulation) space → screen space.
+    @State private var zoom: CGFloat = 1
+    @State private var baseZoom: CGFloat = 1
+    @State private var pan: CGSize = .zero
+    @State private var basePan: CGSize = .zero
+
+    private enum DragMode: Equatable { case idle, node(String), pan }
+    @State private var dragMode: DragMode = .idle
 
     var body: some View {
         VStack(spacing: 8) {
-            HStack {
-                Toggle("Show history", isOn: $includeHistory)
-                    .toggleStyle(.switch).controlSize(.mini)
-                    .font(.jarvisCaption).foregroundStyle(.white.opacity(0.6))
-                Spacer()
-                Text("\(snapshot.nodes.count) nodes")
-                    .font(.jarvisFootnote).monospacedDigit()
-                    .contentTransition(.numericText())
-                    .animation(.snappy, value: snapshot.nodes.count)
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-            .padding(.horizontal, 4)
+            controls
 
             if snapshot.nodes.isEmpty {
-                Spacer()
-                VStack(spacing: 8) {
-                    Image(systemName: "point.3.connected.trianglepath.dotted")
-                        .font(.system(size: 24, weight: .light)).foregroundStyle(.white.opacity(0.55))
-                    Text("Your knowledge graph will grow as you talk to Jarvis")
-                        .font(.jarvisCaption).foregroundStyle(.white.opacity(0.55))
-                        .multilineTextAlignment(.center)
-                }
-                Spacer()
+                JarvisEmptyState(
+                    symbol: "point.3.connected.trianglepath.dotted",
+                    title: "Your knowledge graph is empty",
+                    message: "People, projects, and places from your conversations connect here as Jarvis learns about you."
+                )
             } else {
                 canvas
-                legend
+                if let selected, let node = snapshot.nodes.first(where: { $0.id == selected }) {
+                    inspector(node)
+                } else {
+                    legend
+                }
             }
         }
         .task { await reload() }
         .onChange(of: includeHistory) { _, _ in Task { await reload() } }
+        .onChange(of: selected) { _, id in Task { await loadRelated(id) } }
         .onReceive(NotificationCenter.default.publisher(for: .jarvisGraphDidChange)) { _ in
             // Posted on the main actor by MemoryStore, so it's safe to reload here.
             Task { await reload() }
         }
         .onDisappear { layout?.cancel() }
+    }
+
+    private var controls: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.jarvisCaption)
+                    .foregroundStyle(Color.jarvisTextTertiary)
+                TextField("Find a node", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.jarvisCaption)
+                    .foregroundStyle(Color.jarvisTextPrimary)
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.jarvisCaption)
+                            .foregroundStyle(Color.jarvisTextTertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: JarvisRadius.control, style: .continuous).fill(Color.jarvisSurface))
+            .frame(maxWidth: 200)
+
+            Toggle("History", isOn: $includeHistory)
+                .toggleStyle(.switch).controlSize(.mini)
+                .font(.jarvisCaption).foregroundStyle(Color.jarvisTextSecondary)
+
+            Spacer()
+
+            if zoom != 1 || pan != .zero {
+                Button {
+                    withAnimation(.snappy) { zoom = 1; baseZoom = 1; pan = .zero; basePan = .zero }
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.jarvisTextSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Color.jarvisSurfaceHover))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Reset view")
+            }
+
+            Text("\(snapshot.nodes.count) nodes")
+                .font(.jarvisFootnote).monospacedDigit()
+                .contentTransition(.numericText())
+                .animation(.snappy, value: snapshot.nodes.count)
+                .foregroundStyle(Color.jarvisTextTertiary)
+        }
+        .padding(.horizontal, 4)
     }
 
     private var canvas: some View {
@@ -60,10 +117,132 @@ struct GraphView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { location in selectNode(near: location, in: geo.size) }
+            .gesture(dragGesture(in: geo.size))
+            .simultaneousGesture(magnifyGesture)
             .onAppear { startLayout(in: geo.size) }
             .onChange(of: geo.size) { _, newSize in startLayout(in: newSize) }
             .accessibilityHidden(true)
         }
+    }
+
+    /// One gesture handles both node-drag (press began on a node) and pan.
+    private func dragGesture(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                switch dragMode {
+                case .idle:
+                    if let hit = nodeID(at: value.startLocation, in: size) {
+                        layout?.cancel() // don't fight the finger
+                        dragMode = .node(hit)
+                    } else {
+                        dragMode = .pan
+                    }
+                case .node(let id):
+                    positions[id] = worldPoint(value.location, in: size)
+                    velocities[id] = .zero
+                case .pan:
+                    pan = CGSize(width: basePan.width + value.translation.width,
+                                 height: basePan.height + value.translation.height)
+                }
+            }
+            .onEnded { _ in
+                if case .node = dragMode {
+                    startLayout(in: size, reseed: false) // let neighbors re-settle
+                }
+                basePan = pan
+                dragMode = .idle
+            }
+    }
+
+    private var magnifyGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                zoom = min(max(baseZoom * value.magnification, 0.4), 3)
+            }
+            .onEnded { _ in baseZoom = zoom }
+    }
+
+    // MARK: - Transform
+
+    private func screenPoint(_ p: CGPoint, in size: CGSize) -> CGPoint {
+        let c = CGPoint(x: size.width / 2, y: size.height / 2)
+        return CGPoint(x: (p.x - c.x) * zoom + c.x + pan.width,
+                       y: (p.y - c.y) * zoom + c.y + pan.height)
+    }
+
+    private func worldPoint(_ s: CGPoint, in size: CGSize) -> CGPoint {
+        let c = CGPoint(x: size.width / 2, y: size.height / 2)
+        return CGPoint(x: (s.x - pan.width - c.x) / zoom + c.x,
+                       y: (s.y - pan.height - c.y) / zoom + c.y)
+    }
+
+    // MARK: - Inspector / legend
+
+    /// Selected-node strip: name, kind, relations, and the memories it appears
+    /// in — the click-through from graph back to memory.
+    private func inspector(_ node: GraphReader.Node) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Circle().fill(kindColor(node.kind)).frame(width: 7, height: 7)
+                Text(node.name)
+                    .font(.jarvisRow)
+                    .foregroundStyle(Color.jarvisTextPrimary)
+                    .lineLimit(1)
+                Text(node.kind)
+                    .font(.jarvisFootnote)
+                    .foregroundStyle(Color.jarvisTextTertiary)
+                Spacer(minLength: 0)
+                Button {
+                    withAnimation(.snappy) { selected = nil }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.jarvisCaption)
+                        .foregroundStyle(Color.jarvisTextTertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Deselect node")
+            }
+            ForEach(relations(of: node.id).prefix(3), id: \.self) { line in
+                Text(line)
+                    .font(.jarvisFootnote)
+                    .foregroundStyle(Color.jarvisTextSecondary)
+                    .lineLimit(1)
+            }
+            ForEach(relatedMemories) { memory in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "brain")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color.jarvisTextTertiary)
+                    Text(memory.text)
+                        .font(.jarvisFootnote)
+                        .foregroundStyle(Color.jarvisTextSecondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: JarvisRadius.card, style: .continuous).fill(Color.jarvisSurface))
+        .transition(.opacity)
+    }
+
+    private func relations(of id: String) -> [String] {
+        let names = Dictionary(snapshot.nodes.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        return snapshot.edges.filter { $0.source == id || $0.target == id }.map { edge in
+            let relation = edge.relation.replacingOccurrences(of: "_", with: " ")
+            return edge.source == id
+                ? "\(relation) → \(names[edge.target] ?? "?")"
+                : "\(names[edge.source] ?? "?") → \(relation)"
+        }
+    }
+
+    private func loadRelated(_ id: String?) async {
+        guard let id, let memoryStore,
+              let node = snapshot.nodes.first(where: { $0.id == id }) else {
+            relatedMemories = []
+            return
+        }
+        relatedMemories = await memoryStore.retrieve(query: node.name, limit: 2)
     }
 
     /// Tiny kind→color key so the node colors are decodable at a glance.
@@ -76,7 +255,7 @@ struct GraphView: View {
             ForEach(kinds, id: \.0) { kind, label in
                 HStack(spacing: 4) {
                     Circle().fill(kindColor(kind)).frame(width: 6, height: 6)
-                    Text(label).font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55))
+                    Text(label).font(.jarvisFootnote).foregroundStyle(Color.jarvisTextTertiary)
                 }
             }
             Spacer()
@@ -86,14 +265,23 @@ struct GraphView: View {
 
     // MARK: - Drawing
 
+    private var matchedIDs: Set<String> {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        return Set(snapshot.nodes.filter { $0.name.localizedCaseInsensitiveContains(q) }.map(\.id))
+    }
+
     private func drawEdges(_ context: GraphicsContext, size: CGSize) {
+        let searching = !matchedIDs.isEmpty || !query.trimmingCharacters(in: .whitespaces).isEmpty
         for edge in snapshot.edges {
-            guard let a = positions[edge.source], let b = positions[edge.target] else { continue }
+            guard let wa = positions[edge.source], let wb = positions[edge.target] else { continue }
+            let a = screenPoint(wa, in: size), b = screenPoint(wb, in: size)
             let highlighted = selected == edge.source || selected == edge.target
             var path = Path()
             path.move(to: a)
             path.addLine(to: b)
-            let opacity = edge.isCurrent ? (highlighted ? 0.7 : 0.22) : 0.1
+            var opacity = edge.isCurrent ? (highlighted ? 0.7 : 0.22) : 0.1
+            if searching, !highlighted { opacity *= 0.4 }
             context.stroke(path, with: .color(.white.opacity(opacity)), lineWidth: highlighted ? 1.5 : 0.8)
 
             if highlighted {
@@ -108,18 +296,36 @@ struct GraphView: View {
     }
 
     private func drawNodes(_ context: GraphicsContext, size: CGSize) {
+        let matches = matchedIDs
+        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
         for node in snapshot.nodes {
-            guard let p = positions[node.id] else { continue }
+            guard let world = positions[node.id] else { continue }
+            let p = screenPoint(world, in: size)
+            // Skip nodes panned/zoomed out of view.
+            guard p.x > -40, p.x < size.width + 40, p.y > -40, p.y < size.height + 40 else { continue }
             let isSelected = selected == node.id
-            let radius: CGFloat = isSelected ? 7 : 5
+            let isMatch = matches.contains(node.id)
+            let dimmed = searching && !isMatch && !isSelected
+            let radius: CGFloat = (isSelected ? 7 : 5) * min(zoom, 1.6)
             let color = kindColor(node.kind).opacity(node.isCurrent ? 1 : 0.4)
             context.fill(Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)),
-                         with: .color(color))
-            context.draw(
+                         with: .color(color.opacity(dimmed ? 0.25 : 1)))
+            if isMatch {
+                context.stroke(
+                    Path(ellipseIn: CGRect(x: p.x - radius - 3, y: p.y - radius - 3,
+                                           width: (radius + 3) * 2, height: (radius + 3) * 2)),
+                    with: .color(.white.opacity(0.8)), lineWidth: 1.2)
+            }
+
+            let label = context.resolve(
                 Text(node.name).font(.system(size: isSelected ? 11 : 10, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(.white.opacity(isSelected ? 0.95 : 0.65)),
-                at: CGPoint(x: p.x, y: p.y - radius - 7)
+                    .foregroundStyle(.white.opacity(dimmed ? 0.2 : (isSelected ? 0.95 : 0.65)))
             )
+            // Clamp labels inside the canvas so edge nodes stay readable.
+            let measured = label.measure(in: size)
+            let x = min(max(p.x, measured.width / 2 + 2), size.width - measured.width / 2 - 2)
+            let y = max(p.y - radius - 7, measured.height / 2)
+            context.draw(label, at: CGPoint(x: x, y: y))
         }
     }
 
@@ -136,9 +342,9 @@ struct GraphView: View {
 
     // MARK: - Layout
 
-    private func startLayout(in size: CGSize) {
+    private func startLayout(in size: CGSize, reseed: Bool = true) {
         layout?.cancel()
-        seedPositions(in: size)
+        if reseed { seedPositions(in: size) }
         layout = Task {
             // Stop as soon as the simulation settles (kinetic energy below a
             // per-node threshold) instead of always burning 600 iterations.
@@ -197,6 +403,8 @@ struct GraphView: View {
 
         var energy: CGFloat = 0
         for node in snapshot.nodes {
+            // A node under the user's finger stays exactly where they put it.
+            if case .node(let dragged) = dragMode, dragged == node.id { continue }
             guard var p = positions[node.id], var v = velocities[node.id], let f = forces[node.id] else { continue }
             // Gentle pull to center + damping.
             v.dx = (v.dx + f.dx + (center.x - p.x) * 0.005) * 0.85
@@ -211,22 +419,33 @@ struct GraphView: View {
     }
 
     private func selectNode(near location: CGPoint, in size: CGSize) {
-        let hit = snapshot.nodes.min { a, b in
-            distance(positions[a.id], location) < distance(positions[b.id], location)
-        }
-        if let hit, distance(positions[hit.id], location) < 24 {
-            selected = (selected == hit.id) ? nil : hit.id
-        } else {
-            selected = nil
+        withAnimation(.snappy) {
+            if let hit = nodeID(at: location, in: size) {
+                selected = (selected == hit) ? nil : hit
+            } else {
+                selected = nil
+            }
         }
     }
 
-    private func distance(_ p: CGPoint?, _ q: CGPoint) -> CGFloat {
-        guard let p else { return .greatestFiniteMagnitude }
-        return sqrt(pow(p.x - q.x, 2) + pow(p.y - q.y, 2))
+    /// Screen-space hit test (points are transformed, so test in screen space).
+    private func nodeID(at location: CGPoint, in size: CGSize) -> String? {
+        var best: (id: String, dist: CGFloat)?
+        for node in snapshot.nodes {
+            guard let world = positions[node.id] else { continue }
+            let p = screenPoint(world, in: size)
+            let d = sqrt(pow(p.x - location.x, 2) + pow(p.y - location.y, 2))
+            if d < 24, d < (best?.dist ?? .greatestFiniteMagnitude) {
+                best = (node.id, d)
+            }
+        }
+        return best?.id
     }
 
     private func reload() async {
         snapshot = await reader.snapshot(includeHistory: includeHistory)
+        if let selected, !snapshot.nodes.contains(where: { $0.id == selected }) {
+            self.selected = nil
+        }
     }
 }

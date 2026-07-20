@@ -27,6 +27,8 @@ final class MeetingService {
     private(set) var isActive = false
     private(set) var activeAppName = ""
     private(set) var lines: [MeetingLine] = []
+    /// When the live meeting started — drives the closed-notch timer.
+    private(set) var activeSince: Date?
 
     // MARK: - Dependencies
 
@@ -134,6 +136,7 @@ final class MeetingService {
         self.transcript = []
         self.lines = []
         self.activeAppName = appName
+        self.activeSince = row.startedAt
         self.isActive = true
 
         pump = Task { [weak self] in
@@ -162,6 +165,7 @@ final class MeetingService {
         self.meeting = nil
         meetingBundleID = nil
         isActive = false
+        activeSince = nil
         pump?.cancel()
         pump = nil
 

@@ -4,35 +4,9 @@ import JStore
 import Quartz
 import SwiftUI
 
-/// Activity › Artifacts: every artifact the agent has spilled or generated, with
-/// Quick Look and reveal-in-Finder. Replaces the ComingSoon placeholder.
-struct ArtifactsPane: View {
-    let database: JarvisDatabase
-    @State private var artifacts: [ArtifactRow] = []
-
-    var body: some View {
-        Group {
-            if artifacts.isEmpty {
-                PaneMessage(symbol: "shippingbox", label: "No artifacts yet")
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(artifacts) { ArtifactRowView(artifact: $0) }
-                    }
-                    .padding(.bottom, 10)
-                }
-            }
-        }
-        .task {
-            artifacts = (try? await database.reader.read { db in
-                try ArtifactRow.order(Column("created_at").desc).limit(200).fetchAll(db)
-            }) ?? []
-        }
-    }
-}
-
-/// One artifact row — reused by the Runs detail view. Filename + metadata, an
-/// optional preview line, and Quick Look / reveal-in-Finder actions.
+/// One artifact row — used by the Activity timeline and the run detail view.
+/// Filename + metadata, an optional preview line, and Quick Look /
+/// reveal-in-Finder actions.
 struct ArtifactRowView: View {
     let artifact: ArtifactRow
 
@@ -110,27 +84,6 @@ struct ArtifactRowView: View {
 
     private func byteText(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
-    }
-}
-
-/// Empty-state placeholder — a local twin of ActivityView's private ComingSoonPane
-/// so panes in their own files can share the look.
-struct PaneMessage: View {
-    let symbol: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Spacer()
-            Image(systemName: symbol)
-                .font(.system(size: 22, weight: .light))
-                .foregroundStyle(.white.opacity(0.55))
-            Text(label)
-                .font(.jarvisCaption)
-                .foregroundStyle(.white.opacity(0.55))
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

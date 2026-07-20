@@ -55,14 +55,42 @@ struct TaskStore: Sendable {
     // MARK: - Tasks
 
     /// Inserts a task unless an identical-text one is already suggested/open.
-    func addTask(text: String, source: TaskRow.Source, sourceID: String?, dueAt: Date? = nil) async {
+    /// Extraction-sourced tasks land as `.suggested` for review; manual adds
+    /// pass `.open` so they're immediately actionable.
+    func addTask(text: String, source: TaskRow.Source, sourceID: String?, dueAt: Date? = nil,
+                 status: TaskRow.Status = .suggested) async {
         _ = try? await database.writer.write { db in
             let dup = try TaskRow
                 .filter(Column("text") == text)
                 .filter([TaskRow.Status.suggested.rawValue, TaskRow.Status.open.rawValue].contains(Column("status")))
                 .fetchCount(db)
             if dup > 0 { return }
-            try TaskRow(text: text, source: source, sourceId: sourceID, dueAt: dueAt).insert(db)
+            try TaskRow(text: text, source: source, sourceId: sourceID, status: status, dueAt: dueAt).insert(db)
+        }
+    }
+
+    /// Streams suggested + open tasks so the Tasks pane updates live as
+    /// extraction lands new rows.
+    func observeActiveTasks() -> AsyncValueObservation<[TaskRow]> {
+        ValueObservation
+            .tracking { db in
+                try TaskRow
+                    .filter([TaskRow.Status.suggested.rawValue, TaskRow.Status.open.rawValue].contains(Column("status")))
+                    .order(Column("created_at").desc)
+                    .fetchAll(db)
+            }
+            .values(in: database.reader)
+    }
+
+    func setTaskText(_ id: String, _ text: String) async {
+        _ = try? await database.writer.write { db in
+            try db.execute(sql: "UPDATE task SET text = ? WHERE id = ?", arguments: [text, id])
+        }
+    }
+
+    func setTaskDue(_ id: String, _ dueAt: Date?) async {
+        _ = try? await database.writer.write { db in
+            try db.execute(sql: "UPDATE task SET due_at = ? WHERE id = ?", arguments: [dueAt, id])
         }
     }
 

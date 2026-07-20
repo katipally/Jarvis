@@ -6,6 +6,8 @@ import SwiftUI
 /// with the same visuals as the live transcript.
 struct HistoryView: View {
     let sessions: SessionManager
+    /// "Continue this conversation" — reopens the segment in Home.
+    var onContinue: ((String) -> Void)? = nil
     @State private var segments: [SessionManager.SegmentSummary] = []
     @State private var selected: SessionManager.SegmentSummary?
     @State private var detailMessages: [DisplayMessage]?
@@ -100,7 +102,8 @@ struct HistoryView: View {
                                 renameText = segment.title ?? ""
                                 renaming = segment
                             },
-                            delete: { pendingDelete = segment }
+                            delete: { pendingDelete = segment },
+                            continueAction: onContinue.map { handler in { handler(segment.id) } }
                         )
                     }
                 }
@@ -158,11 +161,36 @@ struct HistoryView: View {
                         .foregroundStyle(.white.opacity(0.55))
                 }
                 Spacer()
+
+                if let onContinue {
+                    Button {
+                        onContinue(segment.id)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.uturn.left")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text("Continue")
+                                .font(.jarvisCaption.weight(.medium))
+                        }
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.jarvisSurfaceHover))
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .pointerStyle(.link)
+                    .help("Reopen this conversation in Home")
+                    .accessibilityLabel("Continue conversation")
+                }
             }
             .padding(.bottom, 10)
 
             if let detailMessages {
-                ScrollView {
+                if detailMessages.isEmpty {
+                    JarvisEmptyState(symbol: "bubble.left", title: "This conversation is empty")
+                } else {
+                    ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         ForEach(detailMessages) { row in
                             MessageRow(message: row)
@@ -180,6 +208,7 @@ struct HistoryView: View {
                             .frame(height: 12)
                     }
                 }
+                }
             } else {
                 Spacer()
                 ProgressView().controlSize(.small)
@@ -194,6 +223,7 @@ private struct ConversationCard: View {
     let open: () -> Void
     let rename: () -> Void
     let delete: () -> Void
+    var continueAction: (() -> Void)? = nil
 
     @State private var isHovering = false
 
@@ -259,6 +289,9 @@ private struct ConversationCard: View {
                 .strokeBorder(Color.jarvisStroke, lineWidth: 1)
         )
         .contextMenu {
+            if let continueAction {
+                Button("Continue in Home", action: continueAction)
+            }
             Button("Rename…", action: rename)
             Button("Delete", role: .destructive, action: delete)
         }

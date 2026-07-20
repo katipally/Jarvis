@@ -162,16 +162,15 @@ private struct RunToolRow: View {
             .buttonStyle(.plain)
 
             if expanded, hasOutput {
-                ScrollView {
-                    Text(tool.output)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 140)
-                .padding(.top, 8)
-                .transition(.opacity)
+                // Expands in place; the detail view's outer ScrollView handles
+                // long outputs instead of trapping them in a nested scroller.
+                Text(tool.output)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+                    .transition(.opacity)
             }
         }
         .padding(.horizontal, 10)
@@ -275,6 +274,7 @@ enum RunFormat {
 /// (tokens, cost, duration, tool count). Tapping opens `RunDetailView`.
 struct RunRowCard: View {
     let run: RunStore.RunSummary
+    var artifactCount: Int = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -297,6 +297,13 @@ struct RunRowCard: View {
                 if let dur = RunFormat.duration(run.duration) { metric(dur) }
                 if !run.toolCalls.isEmpty {
                     metric("\(run.toolCalls.count) tool\(run.toolCalls.count == 1 ? "" : "s")")
+                }
+                if artifactCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "paperclip").font(.system(size: 8))
+                        Text("\(artifactCount)").font(.jarvisFootnote).monospacedDigit()
+                    }
+                    .foregroundStyle(.white.opacity(0.5))
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")

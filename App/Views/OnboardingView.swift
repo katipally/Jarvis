@@ -40,9 +40,9 @@ struct OnboardingView: View {
             Spacer()
             Image(systemName: "sparkles").font(.system(size: 34, weight: .light))
                 .foregroundStyle(LinearGradient(colors: [.blue, .purple, .pink], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Text("Meet Jarvis").font(.system(size: 22, weight: .semibold)).foregroundStyle(.white)
+            Text("Meet Jarvis").font(Self.titleFont).foregroundStyle(.white)
             Text("Your Mac's own assistant — it lives in the notch, remembers what matters, and can act on your behalf. Everything stays on your Mac.")
-                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                .font(.jarvisBody).foregroundStyle(Color.jarvisTextSecondary)
                 .multilineTextAlignment(.center).frame(maxWidth: 380)
             Spacer()
             primaryButton("Get started") { advance() }
@@ -54,9 +54,9 @@ struct OnboardingView: View {
         VStack(spacing: 14) {
             Spacer()
             Image(systemName: "mic.fill").font(.system(size: 30, weight: .light)).foregroundStyle(.white.opacity(0.8))
-            Text("Talk to Jarvis").font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
+            Text("Talk to Jarvis").font(Self.stepTitleFont).foregroundStyle(.white)
             Text("Hold the Option key anywhere to speak. Transcription is on-device. Grant microphone access to enable it.")
-                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                .font(.jarvisBody).foregroundStyle(Color.jarvisTextSecondary)
                 .multilineTextAlignment(.center).frame(maxWidth: 360)
             Spacer()
             HStack(spacing: 10) {
@@ -77,9 +77,9 @@ struct OnboardingView: View {
             Image(systemName: "checkmark.circle.fill").font(.system(size: 34))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(Color.jarvisSuccess)
-            Text("You're all set").font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
+            Text("You're all set").font(Self.stepTitleFont).foregroundStyle(.white)
             Text("Hover the notch and type, or hold Option to talk. Jarvis will ask before doing anything that changes your Mac.")
-                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                .font(.jarvisBody).foregroundStyle(Color.jarvisTextSecondary)
                 .multilineTextAlignment(.center).frame(maxWidth: 380)
             Spacer()
             primaryButton("Start using Jarvis") {
@@ -96,8 +96,18 @@ struct OnboardingView: View {
             }
         }
         .padding(.bottom, 16)
-        .accessibilityHidden(true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Step \(stepIndex + 1) of 4")
     }
+
+    private var stepIndex: Int {
+        [Step.welcome, .provider, .voice, .done].firstIndex(of: step) ?? 0
+    }
+
+    /// Onboarding display sizes — hero type the shared scale doesn't cover,
+    /// defined once instead of scattered per step.
+    private static let titleFont = Font.system(size: 22, weight: .semibold)
+    private static let stepTitleFont = Font.system(size: 19, weight: .semibold)
 
     private func advance() {
         switch step {
@@ -110,7 +120,7 @@ struct OnboardingView: View {
 
     private func primaryButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+            Text(title).font(.jarvisBody.weight(.semibold)).foregroundStyle(.white)
                 .padding(.horizontal, 24).padding(.vertical, 10)
                 .background(Capsule().fill(Color.jarvisAccent))
         }
@@ -119,7 +129,7 @@ struct OnboardingView: View {
 
     private func secondaryButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.7))
+            Text(title).font(.jarvisBody.weight(.medium)).foregroundStyle(Color.jarvisTextSecondary)
                 .padding(.horizontal, 20).padding(.vertical, 10)
                 .background(Capsule().fill(.white.opacity(0.1)))
         }
@@ -142,9 +152,9 @@ private struct ProviderStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Connect a model").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
+            Text("Connect a model").font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
             Text("Bring your own API key — Anthropic, OpenAI, or MiniMax. It's stored in your Keychain.")
-                .font(.system(size: 12)).foregroundStyle(.white.opacity(0.55))
+                .font(.jarvisCaption).foregroundStyle(Color.jarvisTextTertiary)
 
             if accountID == nil {
                 Picker("Provider", selection: $provider) {
@@ -160,7 +170,7 @@ private struct ProviderStep: View {
 
                 HStack {
                     Button("Skip for now") { onContinue() }
-                        .buttonStyle(.plain).font(.system(size: 12))
+                        .buttonStyle(.plain).font(.jarvisRow)
                         .foregroundStyle(.white.opacity(0.45))
                     Spacer()
                     Button { connect() } label: {
@@ -182,7 +192,7 @@ private struct ProviderStep: View {
                         Spacer()
                         Image(systemName: "chevron.up.chevron.down").font(.system(size: 9)).foregroundStyle(.white.opacity(0.4))
                     }
-                    .font(.system(size: 13)).padding(10)
+                    .font(.jarvisBody).padding(10)
                     .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.08)))
                 }
                 .buttonStyle(.plain)

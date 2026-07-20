@@ -5,4 +5,5 @@ DerivedData/
 .build/
 .swiftpm/
 xcuserdata/
-.backups/
+.backups
+.vscode

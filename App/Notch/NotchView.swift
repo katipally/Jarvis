@@ -7,6 +7,8 @@ struct NotchView: View {
     var voice: VoiceController?
     var meetings: MeetingService?
     @State private var isHovering = false
+    @State private var peekText: String?
+    @State private var peekDismiss: Task<Void, Never>?
     @Namespace private var tabPillNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -75,10 +77,25 @@ struct NotchView: View {
     private var topCornerRadius: CGFloat { vm.state == .open ? 20 : 6 }
     private var bottomCornerRadius: CGFloat { vm.state == .open ? 26 : 14 }
 
+    /// Live meeting indicator on the closed notch (primary display only, and
+    /// never while the voice chrome owns the bar).
+    private var showsMeetingBar: Bool {
+        isPrimary && vm.state == .closed && !showsListening && peekText == nil
+            && meetings?.isActive == true
+    }
+
+    /// Background-run pulse: Jarvis is answering while the notch is closed.
+    private var showsWorkingBar: Bool {
+        isPrimary && vm.state == .closed && !showsListening && peekText == nil
+            && !showsMeetingBar && agentWorking
+    }
+
     private var displayedSize: CGSize {
         if showsOnboarding { return vm.onboardingSize }
         if vm.state == .open { return vm.currentOpenContentSize }
-        if showsListening { return vm.listeningSize }
+        if showsListening { return voice?.phase == .review ? vm.listeningReviewSize : vm.listeningSize }
+        if peekText != nil, isPrimary { return vm.listeningSize }
+        if showsMeetingBar || showsWorkingBar { return vm.closedStatusSize }
         return vm.closedNotchSize
     }
 
@@ -112,6 +129,10 @@ struct NotchView: View {
         .animation(sizeAnimation, value: vm.state)
         .animation(tabAnimation, value: vm.selectedTab)
         .animation(sizeAnimation, value: showsListening)
+        .animation(sizeAnimation, value: voice?.phase == .review)
+        .animation(sizeAnimation, value: peekText != nil)
+        .animation(sizeAnimation, value: showsMeetingBar)
+        .animation(sizeAnimation, value: showsWorkingBar)
         .animation(tabAnimation, value: vm.homeBodyHeight) // answer-fitted growth
         .animation(tabAnimation, value: vm.homeBrowsingHistory) // 30% reading height
         .animation(.easeInOut(duration: 0.35), value: showsGlow)
@@ -187,8 +208,36 @@ struct NotchView: View {
             } else if showsListening, let voice {
                 ListeningView(voice: voice, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height)
                     .transition(.opacity)
+            } else if let peekText, isPrimary, vm.state == .closed {
+                ClosedPeekBar(text: peekText, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height)
+                    .transition(.opacity)
+            } else if showsMeetingBar, let meetings {
+                ClosedMeetingBar(meetings: meetings, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height)
+                    .transition(.opacity)
+            } else if showsWorkingBar {
+                ClosedWorkingBar(cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height)
+                    .transition(.opacity)
             } else {
                 Color.black
+            }
+        }
+        // Nudge peek: a fresh proactive message briefly expands the closed
+        // notch with its first line (Dynamic Island grammar), then retracts.
+        .onChange(of: chat?.proactiveStamp) { _, _ in
+            guard isPrimary, vm.state == .closed, !showsListening,
+                  let text = chat?.latestProactiveText else { return }
+            peekText = text
+            peekDismiss?.cancel()
+            peekDismiss = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(8))
+                guard !Task.isCancelled else { return }
+                peekText = nil
+            }
+        }
+        .onChange(of: vm.state) { _, newState in
+            if newState == .open {
+                peekDismiss?.cancel()
+                peekText = nil
             }
         }
     }
@@ -249,7 +298,10 @@ struct NotchView: View {
                     vm.homeBrowsingHistory = browsing
                 }
             case .history:
-                HistoryView(sessions: chat.sessions)
+                HistoryView(sessions: chat.sessions) { segmentID in
+                    chat.continueConversation(segmentID: segmentID)
+                    withAnimation(tabAnimation) { vm.selectedTab = .home }
+                }
             case .activity:
                 ActivityView(agent: chat.agent, graphReader: chat.graphReader,
                              memoryStore: chat.memory?.store,
@@ -270,6 +322,122 @@ struct NotchView: View {
         } else {
             vm.hoverExited()
         }
+    }
+}
+
+/// Closed-notch nudge peek: bell + the message's first line below the camera.
+private struct ClosedPeekBar: View {
+    let text: String
+    let cameraWidth: CGFloat
+    let cameraHeight: CGFloat
+
+    var body: some View {
+        VStack(spacing: 1) {
+            HStack(spacing: 0) {
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.jarvisLink)
+                    .frame(maxWidth: .infinity)
+                Color.clear.frame(width: cameraWidth + 22)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(maxWidth: .infinity)
+            }
+            .frame(height: cameraHeight)
+
+            Text(text)
+                .font(.jarvisCaption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Jarvis: \(text)")
+    }
+}
+
+/// Closed-notch live-meeting indicator: pulsing dot + elapsed time flanking the
+/// camera. Tap (or hover) opens the panel as usual.
+private struct ClosedMeetingBar: View {
+    let meetings: MeetingService
+    let cameraWidth: CGFloat
+    let cameraHeight: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 5) {
+                PulsingDot(color: .jarvisError, animated: !reduceMotion)
+                Image(systemName: "waveform")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .frame(maxWidth: .infinity)
+            Color.clear.frame(width: cameraWidth + 22)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(elapsed(at: context.date))
+                    .font(.system(size: 10, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(height: cameraHeight)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Meeting being transcribed")
+    }
+
+    private func elapsed(at now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(meetings.activeSince ?? now)))
+        if seconds >= 3600 {
+            return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+        }
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+/// A recording-style dot that softly pulses (static under Reduce Motion).
+private struct PulsingDot: View {
+    let color: Color
+    let animated: Bool
+    @State private var dimmed = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 6, height: 6)
+            .opacity(dimmed ? 0.35 : 1)
+            .onAppear {
+                guard animated else { return }
+                withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) { dimmed = true }
+            }
+    }
+}
+
+/// Closed-notch background-run pulse: Jarvis is answering while closed.
+private struct ClosedWorkingBar: View {
+    let cameraWidth: CGFloat
+    let cameraHeight: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 9))
+                .foregroundStyle(.white.opacity(0.75))
+                .symbolEffect(.pulse, isActive: !reduceMotion)
+                .frame(maxWidth: .infinity)
+            Color.clear.frame(width: cameraWidth + 22)
+            ProgressView()
+                .controlSize(.mini)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(height: cameraHeight)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Jarvis is working")
     }
 }
 

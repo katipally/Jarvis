@@ -148,7 +148,12 @@ struct HomeView: View {
                         // can grow to fit exactly this content.
                         VStack(alignment: .leading, spacing: 14) {
                             ForEach(answerMessages) { message in
-                                MessageRow(message: message)
+                                MessageRow(
+                                    message: message,
+                                    onRetry: (message.role == .assistant && chat.phase == .idle
+                                              && message.id == chat.latestAssistant?.id)
+                                        ? { chat.retryLast() } : nil
+                                )
                             }
                         }
                         .id("live-bottom")
@@ -415,13 +420,13 @@ private struct GreetingView: View {
                 .foregroundStyle(.white)
             TimelineView(.everyMinute) { context in
                 Text(context.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().hour().minute()))
-                    .font(.system(size: 12))
+                    .font(.jarvisRow)
                     .monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(Color.jarvisTextSecondary)
             }
             Text("Ask anything, or drop a file to attach")
                 .font(.jarvisCaption)
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(Color.jarvisTextTertiary)
                 .padding(.top, 2)
             Spacer()
         }
@@ -431,11 +436,18 @@ private struct GreetingView: View {
 
 struct MessageRow: View {
     let message: DisplayMessage
+    /// "Try again" — re-sends the exchange; only set on Home's last assistant row.
+    var onRetry: (() -> Void)? = nil
 
     /// Reasoning timing, measured live from this row's stream (nil for restored
     /// history, where the elapsed time can't be reconstructed).
     @State private var thinkingStartedAt: Date?
     @State private var thinkingDuration: TimeInterval?
+
+    private func copyText() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(message.text, forType: .string)
+    }
 
     var body: some View {
         switch message.role {
@@ -463,6 +475,9 @@ struct MessageRow: View {
                                     .fill(Color.jarvisSurfaceActive)
                                     .strokeBorder(Color.jarvisStroke, lineWidth: 1)
                             )
+                            .contextMenu {
+                                Button("Copy", action: copyText)
+                            }
                     }
                 }
             }
@@ -480,6 +495,12 @@ struct MessageRow: View {
                     Markdown(message.text)
                         .markdownTheme(.jarvis)
                         .textSelection(.enabled)
+                        .contextMenu {
+                            Button("Copy", action: copyText)
+                            if let onRetry {
+                                Button("Try again", action: onRetry)
+                            }
+                        }
                 } else if message.isStreaming {
                     ThinkingDots()
                 }

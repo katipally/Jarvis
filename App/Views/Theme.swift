@@ -38,3 +38,95 @@ extension Color {
     /// Hairline stroke that keeps surfaces from dissolving into the background.
     static let jarvisStroke = Color.white.opacity(0.10)
 }
+
+// MARK: - Text hierarchy
+
+extension Color {
+    /// Body text and titles.
+    static let jarvisTextPrimary = Color.white.opacity(0.92)
+    /// Supporting text: metadata, subtitles, row detail.
+    static let jarvisTextSecondary = Color.white.opacity(0.65)
+    /// De-emphasized text: timestamps, placeholders, empty states.
+    static let jarvisTextTertiary = Color.white.opacity(0.45)
+}
+
+/// Corner-radius scale. Three steps: controls (badges, pills, small buttons),
+/// cards (rows, surfaces), panels (composer, large containers).
+enum JarvisRadius {
+    static let control: CGFloat = 8
+    static let card: CGFloat = 12
+    static let panel: CGFloat = 20
+}
+
+// MARK: - Shared components
+
+/// The single empty/placeholder state used by every pane. Optional call to
+/// action so "empty" can explain how content appears instead of shrugging.
+struct JarvisEmptyState: View {
+    let symbol: String
+    let title: String
+    var message: String? = nil
+    var actionTitle: String? = nil
+    var action: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: symbol)
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(Color.jarvisTextTertiary)
+            Text(title)
+                .font(.jarvisRow)
+                .foregroundStyle(Color.jarvisTextSecondary)
+            if let message {
+                Text(message)
+                    .font(.jarvisCaption)
+                    .foregroundStyle(Color.jarvisTextTertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
+            }
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.plain)
+                    .font(.jarvisRow)
+                    .foregroundStyle(Color.jarvisLink)
+                    .padding(.top, 2)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Centered spinner shown while a pane's first fetch is in flight, so panes
+/// never flash their empty state before data arrives.
+struct JarvisLoadingState: View {
+    var body: some View {
+        ProgressView()
+            .controlSize(.small)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// The single uppercased section header used across Settings and panes.
+struct JarvisSectionHeader: View {
+    let title: String
+    var actionTitle: String? = nil
+    var action: (() -> Void)? = nil
+
+    var body: some View {
+        HStack {
+            Text(title.uppercased())
+                .font(.jarvisCaption.weight(.semibold))
+                .foregroundStyle(Color.jarvisTextTertiary)
+                .tracking(0.5)
+            Spacer()
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.plain)
+                    .font(.jarvisCaption)
+                    .foregroundStyle(Color.jarvisLink)
+            }
+        }
+    }
+}

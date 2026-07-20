@@ -40,15 +40,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let localFirst = LocalFirst(local: LocalModel(), core: core)
             let taskStore = TaskStore(database: database)
 
-            let agent = AgentServices(database: database, supportDirectory: appSupport, memoryStore: memoryStore)
+            // Memory: debounced extraction (turn-driven + boot sweep), segment
+            // digest on close, retrieval injection. Extraction runs on-device.
+            // Built before AgentServices so the `remember` tool grows the
+            // knowledge graph too, not just the plain memory rows.
+            let memoryService = MemoryService(core: core, sessions: sessions, store: memoryStore,
+                                              local: localFirst, tasks: taskStore, database: database)
+            let agent = AgentServices(database: database, supportDirectory: appSupport,
+                                      memoryStore: memoryStore, memoryService: memoryService)
             let chat = ChatStore(core: core, sessions: sessions, agent: agent)
             let voice = VoiceController(chat: chat)
             let pushToTalk = PushToTalkMonitor(voice: voice)
-
-            // Memory: debounced extraction (turn-driven + boot sweep), segment
-            // digest on close, retrieval injection. Extraction runs on-device.
-            let memoryService = MemoryService(core: core, sessions: sessions, store: memoryStore,
-                                              local: localFirst, tasks: taskStore, database: database)
             chat.memory = memoryService
             chat.graphReader = GraphReader(database: database)
             self.memoryStore = memoryStore

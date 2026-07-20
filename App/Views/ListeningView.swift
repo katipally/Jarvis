@@ -31,14 +31,36 @@ struct ListeningView: View {
             }
             .frame(height: cameraHeight)
 
-            // Transcript sits below the camera cutout.
-            Text(displayText)
-                .font(.jarvisCaption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.9))
-                .lineLimit(1)
-                .truncationMode(.head)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 16)
+            if voice.phase == .review {
+                // Review before send: the full transcript, scrollable, with an
+                // explicit send/cancel pair (⏎ / Esc work globally too).
+                VStack(spacing: 8) {
+                    ScrollView {
+                        Text(voice.transcript.trimmingCharacters(in: .whitespaces))
+                            .font(.jarvisCaption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .frame(maxHeight: 46)
+                    .padding(.horizontal, 16)
+
+                    HStack(spacing: 10) {
+                        reviewButton("Cancel", symbol: "xmark", prominent: false) { voice.cancel() }
+                        reviewButton("Send", symbol: "arrow.up", prominent: true) { voice.confirmSend() }
+                    }
+                    .padding(.bottom, 8)
+                }
+            } else {
+                // Transcript sits below the camera cutout.
+                Text(displayText)
+                    .font(.jarvisCaption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+            }
         }
     }
 
@@ -46,6 +68,23 @@ struct ListeningView: View {
         let text = voice.transcript.trimmingCharacters(in: .whitespaces)
         if !text.isEmpty { return text }
         return voice.phase == .processing ? "Thinking…" : "Listening…"
+    }
+
+    private func reviewButton(_ title: String, symbol: String, prominent: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 9, weight: .semibold))
+                Text(title).font(.jarvisCaption.weight(.medium))
+            }
+            .foregroundStyle(prominent ? .black : .white.opacity(0.85))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(prominent ? .white.opacity(0.92) : .white.opacity(0.12)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .accessibilityLabel(title == "Send" ? "Send dictation" : "Discard dictation")
     }
 }
 

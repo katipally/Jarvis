@@ -99,6 +99,10 @@ final class ChatStore {
 
     /// Set when Jarvis proactively sends something the user hasn't seen — glows the notch.
     var hasUnreadProactive = false
+    /// Latest proactive text + a bump counter, so the closed notch can briefly
+    /// peek the message inline (Dynamic Island style).
+    private(set) var latestProactiveText: String?
+    private(set) var proactiveStamp = 0
 
     private var transcript: [NeutralMessage] = []
     private var pendingToolResults: [ContentBlock] = []
@@ -334,6 +338,26 @@ final class ChatStore {
         }
     }
 
+    /// Reopens a past conversation from History in Home: its rows become the
+    /// live transcript and the next send appends to that same segment.
+    func continueConversation(segmentID: String) {
+        guard phase == .idle else { return }
+        let sessions = self.sessions
+        Task { @MainActor [weak self] in
+            await sessions.resumeSegment(segmentID)
+            let stored = await sessions.messages(inSegment: segmentID)
+            guard let self else { return }
+            self.messages = DisplayMessage.rows(from: stored)
+            // Rebuild the model-facing transcript from the persisted blocks so
+            // the model actually has the conversation, not just the pixels.
+            self.transcript = stored.map { NeutralMessage(role: $0.role, content: $0.content) }
+            self.historyCursor = stored.first?.createdAt ?? .now
+            self.hasOlderHistory = true
+            self.errorText = nil
+            self.activeAssistantID = nil
+        }
+    }
+
     /// Re-send the last user message (retry affordance after a failure).
     func retryLast() {
         guard phase == .idle, let last = lastUserText, !last.isEmpty else { return }
@@ -430,6 +454,8 @@ final class ChatStore {
         messages.append(DisplayMessage(id: UUID().uuidString, role: .assistant, text: text))
         transcript.append(.assistant(text))
         hasUnreadProactive = true
+        latestProactiveText = text
+        proactiveStamp += 1
         let sessions = self.sessions
         Task {
             // Proactive messages belong to history too (survive relaunch).

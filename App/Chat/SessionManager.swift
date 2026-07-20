@@ -85,6 +85,24 @@ actor SessionManager {
         }
     }
 
+    /// Reopens a past conversation as the live segment ("continue from
+    /// History"): the current segment closes, the old one becomes active again,
+    /// and future sends append to it.
+    func resumeSegment(_ id: String, now: Date = .now) async {
+        if let segmentID, segmentID != id {
+            try? await closeSegment(segmentID, reason: .idle, at: now)
+        }
+        _ = try? await database.writer.write { db in
+            if var segment = try Segment.fetchOne(db, key: id) {
+                segment.endedAt = nil
+                segment.closeReason = nil
+                try segment.update(db)
+            }
+        }
+        segmentID = id
+        lastActivity = now
+    }
+
     /// Best-effort close of the live segment on app termination.
     func closeCurrentSegment(now: Date = .now) async {
         guard let segmentID else { return }

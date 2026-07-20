@@ -16,6 +16,7 @@ final class PushToTalkMonitor {
 
     private let holdThreshold: Duration = .milliseconds(350)
     private static let escKeyCode: UInt16 = 53
+    private static let returnKeyCode: UInt16 = 36
 
     init(voice: VoiceController) { self.voice = voice }
 
@@ -51,6 +52,10 @@ final class PushToTalkMonitor {
             if voice.phase == .listening, event.keyCode == Self.escKeyCode {
                 voice.cancel()
                 isHolding = false
+            } else if voice.phase == .review, event.keyCode == Self.returnKeyCode {
+                voice.confirmSend() // review state: ⏎ sends…
+            } else if voice.phase == .review, event.keyCode == Self.escKeyCode {
+                voice.cancel() // …Esc discards
             } else if holdTask != nil {
                 cancelHold() // A different key during the hold aborts it.
             }

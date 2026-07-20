@@ -111,6 +111,18 @@ final class NotchViewModel {
         CGSize(width: clamp(closedNotchSize.width + 200, 340, 400), height: closedNotchSize.height + 26)
     }
 
+    /// Listening size grown for the dictation-review state: the full transcript
+    /// plus the send/cancel pair.
+    var listeningReviewSize: CGSize {
+        CGSize(width: listeningSize.width, height: closedNotchSize.height + 96)
+    }
+
+    /// Slim closed-notch status bar (meeting timer, background-run pulse):
+    /// camera-row height only, widened so the flanks can hold an icon + timer.
+    var closedStatusSize: CGSize {
+        CGSize(width: clamp(closedNotchSize.width + 150, 300, 360), height: closedNotchSize.height)
+    }
+
     /// The window is fixed at the largest a tab can ever need; only the inner
     /// content scales, so expansion always originates from the notch. Home can
     /// grow to half the screen, so the window must always allow for it.

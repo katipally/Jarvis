@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var showAddProvider = false
     @State private var pendingDelete: ProviderAccount?
     @State private var meetingsEnabled = false
+    @State private var meetingsSaveError: String?
 
     private static let sessionGapChoices = [2, 5, 10, 15, 30, 60]
 
@@ -51,7 +52,7 @@ struct SettingsView: View {
 
     private var sessionsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Sessions", trailing: nil, action: nil)
+            JarvisSectionHeader(title: "Sessions")
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Start a new session after")
@@ -85,7 +86,7 @@ struct SettingsView: View {
 
     private var providersSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Providers", trailing: showAddProvider ? "Cancel" : "Add provider") {
+            JarvisSectionHeader(title: "Providers", actionTitle: showAddProvider ? "Cancel" : "Add provider") {
                 withAnimation(.snappy) { showAddProvider.toggle() }
             }
 
@@ -157,7 +158,7 @@ struct SettingsView: View {
 
     private var rolesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Models", trailing: nil, action: nil)
+            JarvisSectionHeader(title: "Models")
             Text("Route each kind of task to any provider and model.")
                 .font(.jarvisCaption).foregroundStyle(.white.opacity(0.55))
                 .padding(.bottom, 2)
@@ -247,7 +248,7 @@ struct SettingsView: View {
 
     private var meetingsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Meetings", trailing: nil, action: nil)
+            JarvisSectionHeader(title: "Meetings")
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Transcribe meetings")
@@ -263,7 +264,14 @@ struct SettingsView: View {
                     get: { meetingsEnabled },
                     set: { newValue in
                         meetingsEnabled = newValue
-                        Task { try? await core.settings.set(MeetingService.settingKey, to: newValue) }
+                        Task {
+                            do {
+                                try await core.settings.set(MeetingService.settingKey, to: newValue)
+                                meetingsSaveError = nil
+                            } catch {
+                                meetingsSaveError = "Couldn't save — \(error.localizedDescription)"
+                            }
+                        }
                     }
                 ))
                 .labelsHidden()
@@ -272,20 +280,15 @@ struct SettingsView: View {
             }
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.jarvisSurface))
-        }
-        .task { meetingsEnabled = ((try? await core.settings.get(MeetingService.settingKey, as: Bool.self)) ?? nil) ?? false }
-    }
 
-    private func sectionHeader(_ title: String, trailing: String?, action: (() -> Void)?) -> some View {
-        HStack {
-            Text(title.uppercased()).font(.jarvisCaption.weight(.semibold)).foregroundStyle(.white.opacity(0.5)).tracking(0.5)
-            Spacer()
-            if let trailing, let action {
-                Button(trailing, action: action)
-                    .buttonStyle(.plain).font(.jarvisCaption.weight(.medium))
-                    .foregroundStyle(Color.jarvisLink)
+            if let meetingsSaveError {
+                Label(meetingsSaveError, systemImage: "exclamationmark.triangle.fill")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.jarvisFootnote)
+                    .foregroundStyle(Color.jarvisError)
             }
         }
+        .task { meetingsEnabled = ((try? await core.settings.get(MeetingService.settingKey, as: Bool.self)) ?? nil) ?? false }
     }
 
     private func emptyCard(_ text: String) -> some View {
@@ -449,12 +452,16 @@ private struct ProactivitySettings: View {
     @State private var recapEnabled = false
     @State private var recapTime = "18:30"
     @State private var tokenBudget = 200_000
+    // onChange fires while load() populates the @States — without this guard
+    // the initial load would write defaults back over stored values.
+    @State private var loaded = false
+    @State private var saveError: String?
 
     private static let times: [String] = (0..<24).flatMap { h in ["00", "30"].map { String(format: "%02d:", h) + $0 } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("PROACTIVITY").font(.jarvisCaption.weight(.semibold)).foregroundStyle(.white.opacity(0.5)).tracking(0.5)
+            JarvisSectionHeader(title: "Proactivity")
             VStack(spacing: 12) {
                 Toggle(isOn: $muted) { label("Mute proactivity", "Silence all nudges, briefs, and reminders.") }.tint(.jarvisLink)
                 row("Aggressiveness", "How readily Jarvis interrupts — scales cooldown and daily cap.") {
@@ -480,14 +487,33 @@ private struct ProactivitySettings: View {
             }
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.jarvisSurface))
+
+            if let saveError {
+                Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.jarvisFootnote)
+                    .foregroundStyle(Color.jarvisError)
+            }
         }
         .task { await load() }
-        .onChange(of: muted) { _, v in Task { try? await settings.set("proactive_muted", to: v) } }
-        .onChange(of: aggressiveness) { _, v in Task { try? await settings.set("proactive_aggressiveness", to: v) } }
-        .onChange(of: briefTime) { _, v in Task { try? await settings.set("brief_time", to: v) } }
-        .onChange(of: recapEnabled) { _, v in Task { try? await settings.set("recap_enabled", to: v) } }
-        .onChange(of: recapTime) { _, v in Task { try? await settings.set("recap_time", to: v) } }
-        .onChange(of: tokenBudget) { _, v in Task { try? await settings.set("proactive_token_budget", to: v) } }
+        .onChange(of: muted) { _, v in save("proactive_muted", v) }
+        .onChange(of: aggressiveness) { _, v in save("proactive_aggressiveness", v) }
+        .onChange(of: briefTime) { _, v in save("brief_time", v) }
+        .onChange(of: recapEnabled) { _, v in save("recap_enabled", v) }
+        .onChange(of: recapTime) { _, v in save("recap_time", v) }
+        .onChange(of: tokenBudget) { _, v in save("proactive_token_budget", v) }
+    }
+
+    private func save<T: Codable & Sendable>(_ key: String, _ value: T) {
+        guard loaded else { return }
+        Task {
+            do {
+                try await settings.set(key, to: value)
+                saveError = nil
+            } catch {
+                saveError = "Couldn't save — \(error.localizedDescription)"
+            }
+        }
     }
 
     private func label(_ title: String, _ subtitle: String?) -> some View {
@@ -506,6 +532,7 @@ private struct ProactivitySettings: View {
         recapEnabled = ((try? await settings.get("recap_enabled", as: Bool.self)) ?? nil) ?? false
         recapTime = ((try? await settings.get("recap_time", as: String.self)) ?? nil) ?? "18:30"
         tokenBudget = ((try? await settings.get("proactive_token_budget", as: Int.self)) ?? nil) ?? 200_000
+        loaded = true
     }
 }
 
@@ -517,13 +544,15 @@ private struct ScreenRewindSection: View {
 
     @State private var policy = ScreenCapturePolicy.default
     @State private var excludedText = ""
+    @State private var stats: ScreenBuffer.StorageStats?
+    @State private var thumbnails: [String] = []
+    @State private var confirmPurge = false
 
     private static let retentionChoices = [24, 72, 168]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("SCREEN REWIND")
-                .font(.jarvisCaption.weight(.semibold)).foregroundStyle(.white.opacity(0.5)).tracking(0.5)
+            JarvisSectionHeader(title: "Screen Rewind")
 
             VStack(alignment: .leading, spacing: 14) {
                 Toggle(isOn: Binding(
@@ -532,7 +561,7 @@ private struct ScreenRewindSection: View {
                 )) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Capture my screen").font(.jarvisBody).foregroundStyle(.white.opacity(0.85))
-                        Text("Passively snapshots the front window so you can search and rewind what you saw. Stored only on this Mac.")
+                        Text("Passively snapshots the front window so Jarvis can recall what you saw — just ask (\"what was that error earlier?\"). Stored only on this Mac.")
                             .font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -569,11 +598,70 @@ private struct ScreenRewindSection: View {
             }
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.jarvisSurface))
+
+            transparencyCard
         }
         .task {
             policy = await ScreenCapturePolicy.load(from: settings)
             excludedText = policy.excludedBundleIDs.joined(separator: ", ")
+            await refreshStats()
         }
+        .confirmationDialog("Delete all captured screen history?", isPresented: $confirmPurge, titleVisibility: .visible) {
+            Button("Delete everything", role: .destructive) {
+                Task {
+                    await screenBuffer.purgeAll()
+                    await refreshStats()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    /// Exactly what Screen Rewind is holding — count, size, age, a peek at the
+    /// most recent captures, and a way to wipe it all.
+    @ViewBuilder
+    private var transparencyCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(statsLine)
+                    .font(.jarvisFootnote).monospacedDigit()
+                    .foregroundStyle(Color.jarvisTextSecondary)
+                Spacer()
+                if let stats, stats.frameCount > 0 {
+                    Button("Delete all", role: .destructive) { confirmPurge = true }
+                        .buttonStyle(.plain)
+                        .font(.jarvisFootnote.weight(.medium))
+                        .foregroundStyle(Color.jarvisError)
+                }
+            }
+
+            if !thumbnails.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(thumbnails, id: \.self) { path in
+                            FrameThumb(path: path)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.03)))
+    }
+
+    private var statsLine: String {
+        guard let stats, stats.frameCount > 0 else { return "Nothing captured yet" }
+        var parts = ["\(stats.frameCount) frames",
+                     ByteCountFormatter.string(fromByteCount: Int64(stats.totalBytes), countStyle: .file)]
+        if let oldest = stats.oldest {
+            parts.append("oldest \(oldest.formatted(.relative(presentation: .named)))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func refreshStats() async {
+        stats = await screenBuffer.storageStats()
+        thumbnails = await screenBuffer.recentFramePaths(limit: 8)
     }
 
     private func label(forHours hours: Int) -> String {
@@ -591,5 +679,30 @@ private struct ScreenRewindSection: View {
         policy = updated
         screenBuffer.setPolicy(updated)
         Task { await updated.save(to: settings) }
+    }
+}
+
+/// One small screen-frame thumbnail in the Rewind transparency strip.
+private struct FrameThumb: View {
+    let path: String
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Color.jarvisSurface
+            }
+        }
+        .frame(width: 68, height: 42)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.jarvisStroke, lineWidth: 1))
+        .task(id: path) {
+            let p = path
+            image = await Task.detached(priority: .utility) { NSImage(contentsOfFile: p) }.value
+        }
     }
 }

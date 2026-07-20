@@ -100,9 +100,17 @@ final class ProactivityService {
             }
         }
         heartbeatTask = Task { [weak self] in
+            // Resume the 20-min cadence where the last launch left off instead
+            // of resetting it — heartbeat_state is persisted for exactly this.
+            let interval: TimeInterval = 1200
+            var delay = interval
+            if let last = await self?.agent.cronStore.heartbeatLastRun() {
+                delay = max(60, interval - Date.now.timeIntervalSince(last))
+            }
+            try? await Task.sleep(for: .seconds(delay))
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1200)) // 20 min
                 await self?.heartbeatTick()
+                try? await Task.sleep(for: .seconds(interval))
             }
         }
     }
@@ -204,8 +212,12 @@ final class ProactivityService {
         guard let draft = await localFirst.generate(NudgeDraft.self, instructions: Self.generateInstructions, prompt: context),
               !draft.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
-        // CRITIC — most drafts should be rejected.
-        guard await passesCritic(draft.message, context: context) else { return }
+        // CRITIC — most drafts should be rejected. Vetoed drafts are recorded
+        // as suppressed so the Activity timeline shows the funnel working.
+        guard await passesCritic(draft.message, context: context) else {
+            await recordSuppressed(body: draft.message, trigger: "context_switch", dedupKey: draft.topic)
+            return
+        }
         guard await funnel.canDeliver(dedupKey: draft.topic) else { return }
         await deliver(title: "Jarvis", body: draft.message, trigger: "context_switch", dedupKey: draft.topic, frameID: frame.appBundleID)
     }
@@ -331,6 +343,7 @@ final class ProactivityService {
         // The heartbeat result must clear the same CRITIC before it can interrupt.
         guard await passesCritic(trimmed, context: "Time-based heartbeat suggestion.") else {
             await agent.cronStore.setHeartbeatRun(.now, result: "vetoed")
+            await recordSuppressed(body: trimmed, trigger: "heartbeat", dedupKey: "heartbeat")
             return
         }
         await agent.cronStore.setHeartbeatRun(.now, result: "nudged")
@@ -339,6 +352,16 @@ final class ProactivityService {
     }
 
     // MARK: - Delivery
+
+    /// A drafted nudge the CRITIC vetoed. Written straight to the nudge table
+    /// (NOT through the funnel — suppression must not consume cooldown/caps) so
+    /// the Activity timeline can show what was held back and why.
+    private func recordSuppressed(body: String, trigger: String, dedupKey: String?) async {
+        _ = try? await tasks.database.writer.write { db in
+            try NudgeRow(trigger: trigger, dedupKey: dedupKey, title: nil, body: body,
+                         state: "suppressed").insert(db)
+        }
+    }
 
     @discardableResult
     private func deliver(title: String, body: String, trigger: String, dedupKey: String?, frameID: String?) async -> Bool {

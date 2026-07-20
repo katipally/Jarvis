@@ -205,6 +205,52 @@ public final class ScreenBuffer: @unchecked Sendable {
         }
     }
 
+    // MARK: - Transparency (Settings)
+
+    /// What Screen Rewind is holding right now — shown in Settings so the user
+    /// can see exactly what has been captured.
+    public struct StorageStats: Sendable {
+        public let frameCount: Int
+        public let totalBytes: Int
+        public let oldest: Date?
+
+        public init(frameCount: Int, totalBytes: Int, oldest: Date?) {
+            self.frameCount = frameCount
+            self.totalBytes = totalBytes
+            self.oldest = oldest
+        }
+    }
+
+    public func storageStats() async -> StorageStats {
+        (try? await database.reader.read { db in
+            StorageStats(
+                frameCount: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM screen_frame") ?? 0,
+                totalBytes: try Int.fetchOne(db, sql: "SELECT COALESCE(SUM(bytes),0) FROM screen_frame") ?? 0,
+                oldest: try Date.fetchOne(db, sql: "SELECT MIN(ts) FROM screen_frame")
+            )
+        }) ?? StorageStats(frameCount: 0, totalBytes: 0, oldest: nil)
+    }
+
+    /// JPEG paths of the most recent captures, for the Settings thumbnail strip.
+    public func recentFramePaths(limit: Int = 8) async -> [String] {
+        (try? await database.reader.read { db in
+            try String.fetchAll(db, sql: "SELECT jpeg_path FROM screen_frame ORDER BY ts DESC LIMIT ?",
+                                arguments: [limit])
+        }) ?? []
+    }
+
+    /// Deletes every stored frame — rows, FTS entries (kept in sync by GRDB),
+    /// and the JPEG files on disk.
+    public func purgeAll() async {
+        _ = try? await database.writer.write { db in
+            let all = try ScreenFrameRow.fetchAll(db)
+            for frame in all {
+                try? FileManager.default.removeItem(atPath: frame.jpegPath)
+                try ScreenFrameRow.deleteOne(db, key: frame.id)
+            }
+        }
+    }
+
     private func sweep() async {
         let policy = self.policy
         let ttl = TimeInterval(policy.retentionHours) * 3600

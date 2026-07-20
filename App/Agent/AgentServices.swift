@@ -22,7 +22,8 @@ final class AgentServices {
     let funnel: NudgeFunnel
     let cronStore: CronStore
 
-    init(database: JarvisDatabase, supportDirectory: URL, memoryStore: JMemory.MemoryStore) {
+    init(database: JarvisDatabase, supportDirectory: URL, memoryStore: JMemory.MemoryStore,
+         memoryService: MemoryService? = nil) {
         let artifactsDir = supportDirectory.appendingPathComponent("artifacts", isDirectory: true)
         let scratchDir = supportDirectory.appendingPathComponent("scratch", isDirectory: true)
         let framesDir = supportDirectory.appendingPathComponent("frames", isDirectory: true)
@@ -55,7 +56,7 @@ final class AgentServices {
                 + BridgeTools.registry()
                 + ScreenTools.registry(recall: screenRecall, buffer: screenBuffer)
                 + ProactiveTools.registry(cronStore: cronStore)
-                + MemoryTools.registry(store: memoryStore)
+                + MemoryTools.registry(store: memoryStore, memory: memoryService)
         )
 
         presenter.gate = gate

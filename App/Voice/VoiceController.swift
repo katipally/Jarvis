@@ -7,7 +7,7 @@ import Observation
 @MainActor
 @Observable
 final class VoiceController {
-    enum Phase: Equatable { case idle, listening, processing, ready }
+    enum Phase: Equatable { case idle, listening, processing, review, ready }
 
     var phase: Phase = .idle
     var level: Float = 0
@@ -31,7 +31,7 @@ final class VoiceController {
         self.makeEngine = makeEngine
     }
 
-    var isActive: Bool { phase == .listening || phase == .processing }
+    var isActive: Bool { phase == .listening || phase == .processing || phase == .review }
     var showsGlow: Bool { phase != .idle }
 
     func beginListening() {
@@ -79,13 +79,26 @@ final class VoiceController {
             if text.isEmpty {
                 self.phase = .idle
             } else {
-                self.sendAndAwaitAnswer(text)
+                // Review before send: the transcript is shown in full with
+                // explicit send/cancel instead of firing on release.
+                self.finalized = text
+                self.partial = ""
+                self.phase = .review
             }
         }
     }
 
+    /// Confirms the reviewed transcript and sends it.
+    func confirmSend() {
+        guard phase == .review else { return }
+        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { phase = .idle; return }
+        phase = .processing
+        sendAndAwaitAnswer(text)
+    }
+
     func cancel() {
-        guard phase == .listening || phase == .processing else { return }
+        guard phase == .listening || phase == .processing || phase == .review else { return }
         let engine = self.engine
         eventsTask?.cancel()
         Task { _ = await engine?.stop() }
@@ -100,6 +113,7 @@ final class VoiceController {
         switch phase {
         case .idle: beginListening()
         case .listening: endListening()
+        case .review: confirmSend()
         default: break
         }
     }
