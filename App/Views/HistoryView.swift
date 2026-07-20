@@ -8,6 +8,9 @@ struct HistoryView: View {
     let sessions: SessionManager
     /// "Continue this conversation" — reopens the segment in Home.
     var onContinue: ((String) -> Void)? = nil
+    /// Mirrors which conversation (if any) is open in the detail view, so the
+    /// floating tray can host "Continue" below the notch's border.
+    @Binding var openSegmentID: String?
     @State private var segments: [SessionManager.SegmentSummary] = []
     @State private var selected: SessionManager.SegmentSummary?
     @State private var detailMessages: [DisplayMessage]?
@@ -32,6 +35,10 @@ struct HistoryView: View {
             }
         }
         .animation(.snappy(duration: 0.3), value: selected?.id)
+        // Keep the tray's Continue slot in sync with the open conversation,
+        // including when the view is recreated after a tab switch.
+        .onChange(of: selected?.id) { _, id in openSegmentID = id }
+        .onAppear { openSegmentID = selected?.id }
         .task { segments = await sessions.recentSegments() }
         .alert("Rename conversation", isPresented: Binding(
             get: { renaming != nil },
@@ -123,6 +130,7 @@ struct HistoryView: View {
     private func open(_ segment: SessionManager.SegmentSummary) {
         detailMessages = nil
         selected = segment
+        openSegmentID = segment.id
         Task {
             let loaded = await sessions.messages(inSegment: segment.id)
             let rows = DisplayMessage.rows(from: loaded)
@@ -161,28 +169,8 @@ struct HistoryView: View {
                         .foregroundStyle(.white.opacity(0.55))
                 }
                 Spacer()
-
-                if let onContinue {
-                    Button {
-                        onContinue(segment.id)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.uturn.left")
-                                .font(.system(size: 9, weight: .semibold))
-                            Text("Continue")
-                                .font(.jarvisCaption.weight(.medium))
-                        }
-                        .foregroundStyle(.white.opacity(0.85))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(Color.jarvisSurfaceHover))
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .pointerStyle(.link)
-                    .help("Reopen this conversation in Home")
-                    .accessibilityLabel("Continue conversation")
-                }
+                // "Continue" now lives in the floating tray below the notch
+                // (see NotchTray); the context-menu action on cards remains.
             }
             .padding(.bottom, 10)
 

@@ -25,6 +25,11 @@ struct NotchView: View {
     @State private var isHovering = false
     @State private var peekText: String?
     @State private var peekDismiss: Task<Void, Never>?
+    /// Which History conversation is open in the detail view (drives the tray's
+    /// "Continue" slot). Mirrored from HistoryView.
+    @State private var historyOpenSegmentID: String?
+    /// Bumped when the tray's "Back to latest" pill is tapped.
+    @State private var returnToLatestSignal = 0
     @Namespace private var tabPillNamespace
     /// Shared geometry namespace for the compact-bar → open morph: the camera
     /// void and the left/right flanks physically travel into the tab header
@@ -56,6 +61,14 @@ struct NotchView: View {
     }
 
     private var agentWorking: Bool { chat?.phase == .responding }
+
+    /// The agent is working a FOREGROUND turn: show the compact glowing working
+    /// bar (collapsing an open panel too) until the answer streams, then it
+    /// expands. Shown on whichever notch is open, else the primary.
+    private var showsForegroundWorking: Bool {
+        chat?.isWorkingCompact == true && !showsListening && peekText == nil
+            && (vm.state == .open || isPrimary)
+    }
 
     /// Jarvis is doing work the closed notch should reflect: a foreground response
     /// (rare while closed) OR a background run's Live Activity.
@@ -137,6 +150,9 @@ struct NotchView: View {
     /// meeting → working → idle.
     private var presentation: NotchPresentation {
         if showsOnboarding { return .onboarding }
+        // Foreground working outranks .open so a follow-up collapses the panel
+        // to the compact glowing bar, then expands when the answer streams.
+        if showsForegroundWorking { return .working }
         if vm.state == .open { return .open(vm.selectedTab) }
         if showsListening, let voice { return .listening(voice.phase) }
         if let peekText, isPrimary { return .peek(peekText) }
@@ -147,11 +163,58 @@ struct NotchView: View {
 
     private var displayedSize: CGSize { vm.size(for: presentation) }
 
+    /// The floating glass tray rides with the open panel and the compact
+    /// working bar; every other presentation hides it.
+    private var showsTray: Bool {
+        guard chat != nil else { return false }
+        switch presentation {
+        case .open(.home), .working: return true
+        case .open(.history): return historyOpenSegmentID != nil
+        default: return false
+        }
+    }
+
+    private var trayMode: NotchTrayMode {
+        if chat?.phase == .responding { return .stop }
+        switch vm.selectedTab {
+        case .home: return vm.homeBrowsingHistory ? .backToLatest : .composer
+        case .history: return historyOpenSegmentID != nil ? .continueChat : .hidden
+        default: return .hidden
+        }
+    }
+
     var body: some View {
-        // Fixed window: the black notch body scales within it from the top-center.
-        notchBody
-            .frame(width: vm.windowSize.width, height: vm.windowSize.height, alignment: .top)
-            .preferredColorScheme(.dark)
+        // Fixed window: the black notch body scales within it from the top; the
+        // glass tray sits BEHIND it and slides out below on open.
+        ZStack(alignment: .top) {
+            if let chat, showsTray {
+                NotchTray(
+                    mode: trayMode,
+                    chat: chat,
+                    voice: voice,
+                    onBackToLatest: { returnToLatestSignal += 1 },
+                    onContinue: continueOpenHistory
+                )
+                .frame(width: max(displayedSize.width - 8, 220))
+                .offset(y: displayedSize.height + NotchMetrics.trayGap)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(0)
+            }
+            notchBody
+                .zIndex(1)
+        }
+        .frame(width: vm.windowSize.width, height: vm.windowSize.height, alignment: .top)
+        // The tray's slide + retract share the notch's morph/height timelines so
+        // it stays glued to the body's bottom edge as it grows and moves.
+        .animation(morphAnimation, value: presentation)
+        .animation(tabAnimation, value: vm.homeBodyHeight)
+        .preferredColorScheme(.dark)
+    }
+
+    private func continueOpenHistory() {
+        guard let chat, let id = historyOpenSegmentID else { return }
+        chat.continueConversation(segmentID: id)
+        withAnimation(tabAnimation) { vm.selectedTab = .home }
     }
 
     @ViewBuilder
@@ -254,7 +317,10 @@ struct NotchView: View {
                         .transition(.opacity)
                 }
             case .working:
-                ClosedWorkingBar(activity: chat?.liveActivity, cameraWidth: vm.closedNotchSize.width,
+                // Foreground status (thinking → tool → writing) when a live
+                // turn is running; the background Live Activity otherwise.
+                ClosedWorkingBar(activity: chat?.foregroundActivity ?? chat?.liveActivity,
+                                 cameraWidth: vm.closedNotchSize.width,
                                  cameraHeight: vm.closedNotchSize.height, morphNamespace: morphNamespace)
                     .transition(.opacity)
             case .idle:
@@ -294,6 +360,14 @@ struct NotchView: View {
                 // park the transcript in the composer instead.
                 voice?.abandonReview()
             }
+        }
+        .onChange(of: chat?.isWorkingCompact ?? false) { _, compact in
+            // The compact working bar just handed off to the answer: if the run
+            // began while the notch was closed (voice / push-to-talk), open the
+            // panel so the streaming answer is shown, focused.
+            guard !compact, chat?.phase == .responding, vm.state == .closed, isPrimary else { return }
+            vm.selectedTab = .home
+            withAnimation(openAnimation) { vm.open() }
         }
     }
 
@@ -346,20 +420,27 @@ struct NotchView: View {
         if let core, let chat {
             switch vm.selectedTab {
             case .home:
-                HomeView(chat: chat, voice: voice, meetings: meetings) { bodyHeight in
-                    // Grow the notch to fit the answer (NotchViewModel caps at
-                    // half the screen); ignore sub-8pt jitter during streaming.
-                    if abs((vm.homeBodyHeight ?? 0) - bodyHeight) > 4 {
-                        vm.homeBodyHeight = bodyHeight
-                    }
-                } onBrowsingChange: { browsing in
-                    vm.homeBrowsingHistory = browsing
-                }
+                HomeView(
+                    chat: chat, voice: voice, meetings: meetings,
+                    onBodyHeightChange: { bodyHeight in
+                        // Grow the notch to fit the answer (NotchViewModel caps
+                        // at half the screen); ignore sub-4pt jitter.
+                        if abs((vm.homeBodyHeight ?? 0) - bodyHeight) > 4 {
+                            vm.homeBodyHeight = bodyHeight
+                        }
+                    },
+                    onBrowsingChange: { browsing in vm.homeBrowsingHistory = browsing },
+                    returnToLatestSignal: returnToLatestSignal
+                )
             case .history:
-                HistoryView(sessions: chat.sessions) { segmentID in
-                    chat.continueConversation(segmentID: segmentID)
-                    withAnimation(tabAnimation) { vm.selectedTab = .home }
-                }
+                HistoryView(
+                    sessions: chat.sessions,
+                    onContinue: { segmentID in
+                        chat.continueConversation(segmentID: segmentID)
+                        withAnimation(tabAnimation) { vm.selectedTab = .home }
+                    },
+                    openSegmentID: $historyOpenSegmentID
+                )
             case .activity:
                 ActivityView(agent: chat.agent, knowledge: chat.memory, worlds: chat.worlds,
                              graphReader: chat.graphReader,
@@ -519,12 +600,14 @@ private struct ClosedWorkingBar: View {
             .frame(height: cameraHeight)
 
             // The Live Activity's per-step label, below the camera cutout.
+            // Two lines so the verbose status ("Searching the web: …") fits.
             Text(title)
                 .font(.jarvisCaption.weight(.medium))
                 .foregroundStyle(.white.opacity(0.9))
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 14)
                 .contentTransition(.opacity)
         }
         .accessibilityElement(children: .combine)
