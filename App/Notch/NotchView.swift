@@ -307,11 +307,12 @@ struct NotchView: View {
                     withAnimation(tabAnimation) { vm.selectedTab = .home }
                 }
             case .activity:
-                ActivityView(agent: chat.agent, graphReader: chat.graphReader,
-                             memoryStore: chat.memory?.store,
+                ActivityView(agent: chat.agent, knowledge: chat.memory, worlds: chat.worlds,
+                             graphReader: chat.graphReader,
                              taskStore: TaskStore(database: core.database))
             case .settings:
-                SettingsView(core: core, screenBuffer: chat.agent.screenBuffer)
+                SettingsView(core: core, screenBuffer: chat.agent.screenBuffer,
+                             knowledge: chat.memory)
             }
         } else {
             ProgressView().controlSize(.small)

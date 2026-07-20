@@ -373,6 +373,182 @@ public final class JarvisDatabase: Sendable {
             try db.create(index: "meeting_segment_on_meeting", on: "meeting_segment", columns: ["meeting_id", "ts"])
         }
 
+        // Knowledge core rework (fresh start, user-approved): the v3 memory/graph
+        // tables are replaced by an episode → fact → entity/edge model with
+        // provenance and bi-temporal edges. Old rows are dropped, not migrated —
+        // conversations/meetings are re-extracted through the new pipeline on
+        // boot (KnowledgeBootstrap). AppDelegate copies jarvis.sqlite to
+        // jarvis-pre-v12.sqlite before opening, as insurance.
+        migrator.registerMigration("v12_knowledge_core") { db in
+            try db.execute(sql: "DROP TABLE IF EXISTS memory_fts")
+            try db.execute(sql: "DROP TABLE IF EXISTS memory")
+            try db.execute(sql: "DROP TABLE IF EXISTS node_alias")
+            try db.execute(sql: "DROP TABLE IF EXISTS graph_edge")
+            try db.execute(sql: "DROP TABLE IF EXISTS graph_node")
+            try db.execute(sql: "DELETE FROM embedding")
+
+            // A world = one data source with an incremental checkpoint cursor.
+            try db.create(table: "world") { t in
+                t.primaryKey("id", .text) // chat | meetings | screen | calendar | contacts | mail | imessage | notes | browser | folder:<hash>
+                t.column("kind", .text).notNull() // llm_text | structured
+                t.column("display_name", .text).notNull()
+                t.column("enabled", .boolean).notNull().defaults(to: false)
+                t.column("cursor_json", .text)
+                t.column("last_sync_at", .datetime)
+                t.column("last_status", .text)
+                t.column("last_error", .text)
+                t.column("created_at", .datetime).notNull()
+            }
+
+            // An episode = one raw unit of experience; the provenance root.
+            try db.create(table: "episode") { t in
+                t.primaryKey("id", .text)
+                t.column("world_id", .text).notNull().references("world", onDelete: .cascade)
+                t.column("external_id", .text) // source-native id; makes re-syncs idempotent
+                t.column("occurred_at", .datetime).notNull()
+                t.column("title", .text)
+                t.column("content", .text).notNull()
+                t.column("extraction_status", .text).notNull().defaults(to: "pending") // pending | done | skipped | failed
+                t.column("extracted_at", .datetime)
+                t.column("created_at", .datetime).notNull()
+                t.uniqueKey(["world_id", "external_id"])
+            }
+            try db.execute(sql: """
+                CREATE INDEX episode_pending ON episode(occurred_at)
+                WHERE extraction_status = 'pending'
+                """)
+
+            try db.create(table: "fact") { t in
+                t.primaryKey("id", .text)
+                t.column("episode_id", .text).references("episode")
+                t.column("text", .text).notNull()
+                t.column("kind", .text).notNull().defaults(to: "raw") // raw | abstract
+                t.column("salience", .double).notNull().defaults(to: 0.5)
+                t.column("superseded_by", .text).references("fact") // reads filter IS NULL
+                t.column("created_at", .datetime).notNull()
+            }
+            try db.create(virtualTable: "fact_fts", using: FTS5()) { t in
+                t.synchronize(withTable: "fact")
+                t.column("text")
+                t.tokenizer = .porter(wrapping: .unicode61())
+            }
+
+            // Entity ids are deterministic (hash of type+norm), so re-ingesting
+            // the same thing merges for free. Fuzzy variants become aliases.
+            try db.create(table: "entity") { t in
+                t.primaryKey("id", .text)
+                t.column("type", .text).notNull() // person | org | place | event | topic | project | thing
+                t.column("name", .text).notNull()
+                t.column("norm", .text).notNull()
+                t.column("attrs_json", .text).notNull().defaults(to: "{}")
+                t.column("is_self", .boolean).notNull().defaults(to: false)
+                t.column("created_at", .datetime).notNull()
+                t.uniqueKey(["type", "norm"])
+            }
+            try db.create(table: "entity_alias") { t in
+                t.column("entity_id", .text).notNull().references("entity", onDelete: .cascade)
+                t.column("alias", .text).notNull()
+                t.column("alias_norm", .text).notNull()
+                t.primaryKey(["entity_id", "alias_norm"])
+            }
+            try db.create(index: "entity_alias_on_norm", on: "entity_alias", columns: ["alias_norm"])
+
+            // Bi-temporal edges (Graphiti model): valid_from/valid_to = when the
+            // fact was true in the world; invalidated_at = when we learned it
+            // stopped being true. History is kept, never deleted.
+            try db.create(table: "edge") { t in
+                t.primaryKey("id", .text)
+                t.column("src_id", .text).notNull().references("entity", onDelete: .cascade)
+                t.column("dst_id", .text).notNull().references("entity", onDelete: .cascade)
+                t.column("rel", .text).notNull() // canonical verb (post-synonym-normalization)
+                t.column("confidence", .double).notNull().defaults(to: 0.8)
+                t.column("valid_from", .datetime)
+                t.column("valid_to", .datetime)
+                t.column("created_at", .datetime).notNull()
+                t.column("invalidated_at", .datetime)
+                t.column("invalidated_by_fact_id", .text).references("fact")
+                t.column("superseded_by", .text).references("edge")
+                t.column("source_fact_id", .text).references("fact")
+                t.column("source_episode_id", .text).references("episode")
+                t.column("world_id", .text)
+            }
+            try db.create(index: "edge_on_src_rel", on: "edge", columns: ["src_id", "rel"])
+            try db.create(index: "edge_on_dst", on: "edge", columns: ["dst_id"])
+            try db.create(index: "edge_on_invalidated", on: "edge", columns: ["invalidated_at"])
+            try db.create(index: "edge_on_source_fact", on: "edge", columns: ["source_fact_id"])
+
+            // One row per world sync — the Activity feed's ingestion entries.
+            try db.create(table: "ingest_run") { t in
+                t.primaryKey("id", .text)
+                t.column("world_id", .text).notNull()
+                t.column("started_at", .datetime).notNull()
+                t.column("ended_at", .datetime)
+                t.column("status", .text).notNull() // running | done | empty | error
+                t.column("episodes_added", .integer).notNull().defaults(to: 0)
+                t.column("facts_added", .integer).notNull().defaults(to: 0)
+                t.column("entities_added", .integer).notNull().defaults(to: 0)
+                t.column("edges_added", .integer).notNull().defaults(to: 0)
+                t.column("error", .text)
+            }
+            try db.create(index: "ingest_run_on_started", on: "ingest_run", columns: ["started_at"])
+        }
+
+        // Decision engine + facet learning (v0.4 M3). Every verdict the engine
+        // reaches — including "stayed quiet" — is a decision row; facets are the
+        // scored, decaying user-preference model.
+        migrator.registerMigration("v13_mind") { db in
+            try db.create(table: "decision") { t in
+                t.primaryKey("id", .text)
+                t.column("ts", .datetime).notNull()
+                t.column("kind", .text).notNull() // trigger | heartbeat | delivery | reflection
+                t.column("source", .text).notNull() // world id or trigger family
+                t.column("trigger_key", .text)
+                // deduped | rate_limited | dropped | acknowledged | budget_downgraded |
+                // reacted | escalated | notified | suppressed | quiet | noted_fact | task_added
+                t.column("action", .text).notNull()
+                t.column("reason", .text).notNull()
+                t.column("payload_json", .text).notNull().defaults(to: "{}")
+                t.column("latency_ms", .integer)
+            }
+            try db.create(index: "decision_on_ts", on: "decision", columns: ["ts"])
+
+            // Content-key sent-dedup for staged deliveries (heads_up/final_call/…).
+            try db.create(table: "delivery_state") { t in
+                t.primaryKey("dedupe_key", .text) // stableKey(category|overlapKey|stage)
+                t.column("category", .text).notNull()
+                t.column("stage", .text).notNull()
+                t.column("sent_at", .datetime).notNull()
+            }
+            try db.create(index: "delivery_state_on_sent", on: "delivery_state", columns: ["sent_at"])
+
+            try db.create(table: "facet") { t in
+                t.primaryKey("key", .text) // 'style/verbosity', 'identity/timezone', …
+                t.column("class", .text).notNull() // identity | veto | tooling | goal | style | channel
+                t.column("value", .text).notNull()
+                t.column("state", .text).notNull() // active | provisional | candidate
+                t.column("stability", .double).notNull()
+                t.column("evidence_count", .integer).notNull().defaults(to: 0)
+                t.column("first_seen_at", .datetime).notNull()
+                t.column("last_seen_at", .datetime).notNull()
+                t.column("user_state", .text).notNull().defaults(to: "auto") // auto | pinned | forgotten
+            }
+
+            // Persisted evidence stream (openhuman keeps this in memory; a
+            // desktop app must survive relaunch). Source of truth for rebuilds.
+            try db.create(table: "facet_evidence") { t in
+                t.primaryKey("id", .text)
+                t.column("class", .text).notNull()
+                t.column("key", .text).notNull()
+                t.column("value", .text).notNull()
+                t.column("cue", .text).notNull() // explicit | structural | behavioral | recurrence
+                t.column("evidence_ref", .text).notNull() // dedup key, e.g. "episode:<id>"
+                t.column("observed_at", .datetime).notNull()
+                t.column("consumed_at", .datetime)
+                t.uniqueKey(["key", "value", "evidence_ref"])
+            }
+            try db.create(index: "facet_evidence_on_key", on: "facet_evidence", columns: ["key"])
+        }
+
         return migrator
     }
 }

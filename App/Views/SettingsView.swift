@@ -1,11 +1,134 @@
+import GRDB
 import JAgent
+import JKnowledge
 import JScreen
 import JStore
 import SwiftUI
 
+/// Learned preference facets: what the decision engine believes about how the
+/// user likes things, with pin (never decays) / forget (never resurfaces).
+private struct FacetsSection: View {
+    let knowledge: KnowledgeService
+
+    @State private var facets: [FacetRow] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            JarvisSectionHeader(title: "Learned preferences")
+            if facets.isEmpty {
+                Text("Nothing learned yet. Jarvis picks up preferences from what you say (\"I prefer…\", \"never…\") and how you react to its nudges.")
+                    .font(.jarvisFootnote).foregroundStyle(Color.jarvisTextTertiary)
+            } else {
+                ForEach(facets) { facet in
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(facet.value)
+                                .font(.jarvisCaption).foregroundStyle(Color.jarvisTextPrimary)
+                                .lineLimit(2)
+                            Text("\(facet.class) · \(facet.state)\(facet.userState == "pinned" ? " · pinned" : "")")
+                                .font(.jarvisFootnote).foregroundStyle(Color.jarvisTextTertiary)
+                        }
+                        Spacer()
+                        Button {
+                            setUserState(facet, facet.userState == "pinned" ? "auto" : "pinned")
+                        } label: {
+                            Image(systemName: facet.userState == "pinned" ? "pin.fill" : "pin")
+                        }
+                        .buttonStyle(.plain).foregroundStyle(Color.jarvisAccent)
+                        .accessibilityLabel("Pin preference")
+                        Button {
+                            setUserState(facet, "forgotten")
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.plain).foregroundStyle(.white.opacity(0.5))
+                        .accessibilityLabel("Forget preference")
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .task { await reload() }
+    }
+
+    private func reload() async {
+        facets = (try? await knowledge.store.database.reader.read { db in
+            try FacetRow
+                .filter(Column("user_state") != "forgotten")
+                .order(Column("stability").desc)
+                .limit(30)
+                .fetchAll(db)
+        }) ?? []
+    }
+
+    private func setUserState(_ facet: FacetRow, _ state: String) {
+        Task {
+            _ = try? await knowledge.store.database.writer.write { db in
+                try db.execute(sql: "UPDATE facet SET user_state = ? WHERE key = ?",
+                               arguments: [state, facet.key])
+            }
+            await reload()
+        }
+    }
+}
+
+/// Debug transparency for the knowledge core: pipeline counters + a manual
+/// drain trigger.
+private struct KnowledgeSection: View {
+    let knowledge: KnowledgeService
+
+    @State private var stats: KnowledgeStore.Stats?
+    @State private var draining = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            JarvisSectionHeader(title: "Knowledge")
+            if let current = stats {
+                HStack(spacing: 14) {
+                    counter("Queue", current.episodesPending)
+                    counter("Episodes", current.episodesDone)
+                    counter("Facts", current.facts)
+                    counter("Entities", current.entities)
+                    counter("Edges", current.edges)
+                    Spacer()
+                    Button(draining ? "Extracting…" : "Extract now") {
+                        draining = true
+                        Task {
+                            await knowledge.drainPendingEpisodes(maxPerBoot: 50)
+                            stats = await knowledge.store.stats()
+                            draining = false
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.jarvisCaption)
+                    .foregroundStyle(Color.jarvisAccent)
+                    .disabled(draining || current.episodesPending == 0)
+                }
+            } else {
+                JarvisLoadingState()
+            }
+        }
+        .padding(.horizontal, 16)
+        .task { stats = await knowledge.store.stats() }
+        .onReceive(NotificationCenter.default.publisher(for: .jarvisGraphDidChange)) { _ in
+            Task { stats = await knowledge.store.stats() }
+        }
+    }
+
+    private func counter(_ label: String, _ value: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)").font(.jarvisBody.weight(.semibold)).monospacedDigit()
+                .foregroundStyle(Color.jarvisTextPrimary)
+            Text(label).font(.jarvisFootnote).foregroundStyle(Color.jarvisTextTertiary)
+        }
+    }
+}
+
 struct SettingsView: View {
     @Bindable var core: JarvisCore
     let screenBuffer: ScreenBuffer
+    var knowledge: KnowledgeService?
 
     @State private var modelsByAccount: [String: [ProviderModel]] = [:]
     @State private var loadingModels: Set<String> = []
@@ -25,6 +148,10 @@ struct SettingsView: View {
                 ProactivitySettings(settings: core.settings)
                 ScreenRewindSection(settings: core.settings, screenBuffer: screenBuffer)
                 meetingsSection
+                if let knowledge {
+                    KnowledgeSection(knowledge: knowledge)
+                    FacetsSection(knowledge: knowledge)
+                }
                 PermissionsDashboard()
             }
             .padding(.vertical, 16)

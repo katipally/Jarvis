@@ -1,6 +1,6 @@
 import AppKit
+import JKnowledge
 import JLocal
-import JMemory
 import JScreen
 import JStore
 import SwiftUI
@@ -13,9 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var chat: ChatStore?
     private var voice: VoiceController?
     private var pushToTalk: PushToTalkMonitor?
-    private var memoryStore: MemoryStore?
-    private var memoryService: MemoryService?
-    private var proactivity: ProactivityService?
+    private var knowledgeStore: KnowledgeStore?
+    private var knowledge: KnowledgeService?
+    private var worldSync: WorldSyncEngine?
+    private var mind: ConsciousnessService?
     private var notifications: NotificationService?
     private var meetings: MeetingService?
     private var sessions: SessionManager?
@@ -29,32 +30,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cacheDir = appSupport.appendingPathComponent("cache", isDirectory: true)
 
         do {
+            // Insurance for the destructive v12 fresh-start migration: keep a
+            // one-time file copy of the pre-v12 database next to the live one.
+            let dbURL = appSupport.appendingPathComponent("jarvis.sqlite")
+            let backupURL = appSupport.appendingPathComponent("jarvis-pre-v12.sqlite")
+            if FileManager.default.fileExists(atPath: dbURL.path),
+               !FileManager.default.fileExists(atPath: backupURL.path) {
+                try? FileManager.default.copyItem(at: dbURL, to: backupURL)
+            }
             let database = try JarvisDatabase.open(directory: appSupport)
             try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
             let core = JarvisCore(database: database, cacheDirectory: cacheDir)
             let sessions = SessionManager(database: database)
-            let memoryStore = MemoryStore(database: database)
+            let knowledgeStore = KnowledgeStore(database: database)
 
-            // One shared on-device model + resolver + task store, used by memory,
-            // proactivity, and meetings (decision D3: local-first, API optional).
+            // One shared on-device model + resolver + task store, used by
+            // knowledge, proactivity, and meetings (local-first, API optional).
             let localFirst = LocalFirst(local: LocalModel(), core: core)
             let taskStore = TaskStore(database: database)
 
-            // Memory: debounced extraction (turn-driven + boot sweep), segment
-            // digest on close, retrieval injection. Extraction runs on-device.
-            // Built before AgentServices so the `remember` tool grows the
-            // knowledge graph too, not just the plain memory rows.
-            let memoryService = MemoryService(core: core, sessions: sessions, store: memoryStore,
-                                              local: localFirst, tasks: taskStore, database: database)
+            // Knowledge core: episodes → debounced on-device extraction → facts
+            // + typed graph; retrieval injection; segment digest on close.
+            let knowledge = KnowledgeService(core: core, sessions: sessions, store: knowledgeStore,
+                                             local: localFirst, tasks: taskStore, database: database)
             let agent = AgentServices(database: database, supportDirectory: appSupport,
-                                      memoryStore: memoryStore, memoryService: memoryService)
+                                      knowledgeStore: knowledgeStore, knowledge: knowledge)
             let chat = ChatStore(core: core, sessions: sessions, agent: agent)
             let voice = VoiceController(chat: chat)
             let pushToTalk = PushToTalkMonitor(voice: voice)
-            chat.memory = memoryService
+            chat.memory = knowledge
             chat.graphReader = GraphReader(database: database)
-            self.memoryStore = memoryStore
-            self.memoryService = memoryService
+            self.knowledgeStore = knowledgeStore
+            self.knowledge = knowledge
+
+            // World connectors: incremental syncs feeding the knowledge core.
+            let worldSync = WorldSyncEngine(store: knowledgeStore, knowledge: knowledge,
+                                            database: database, settings: core.settings,
+                                            supportDirectory: appSupport)
+            chat.worlds = worldSync
+            self.worldSync = worldSync
 
             self.core = core
             self.chat = chat
@@ -67,26 +81,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             Task {
                 await sessions.setOnSegmentClose { segmentID in
-                    // Segment close writes a title/summary digest; durable-memory
-                    // extraction runs continuously (turnCompleted) + at boot.
-                    Task { @MainActor in await memoryService.digestSegment(segmentID) }
+                    // Segment close writes a title/summary digest; extraction
+                    // runs continuously (turnCompleted) + at boot.
+                    Task { @MainActor in await knowledge.digestSegment(segmentID) }
                 }
                 await sessions.recoverOrphanedSegments()
-                await memoryService.bootSweep() // re-embed missing vectors + resume pending extraction
+                await knowledge.bootSweep() // bootstrap + re-embed + resume the episode queue
+                await worldSync.start() // after bootstrap so world rows exist
             }
 
-            // Proactivity v2: real notifications + tasks + commitments + briefs.
+            // The decision engine: heartbeat reflection + trigger pipeline +
+            // staged delivery + facet learning. Every verdict is logged.
             let notifications = NotificationService()
             notifications.onActivate = { NSApp.activate(ignoringOtherApps: true) }
-            let proactivity = ProactivityService(
+            let mind = ConsciousnessService(
                 core: core, chat: chat, agent: agent,
                 localFirst: localFirst, tasks: taskStore, notifications: notifications,
-                memory: memoryService)
-            self.proactivity = proactivity
+                knowledge: knowledge, database: database)
+            self.mind = mind
             self.notifications = notifications
             agent.screenBuffer.onContextSwitch = { frame in
-                Task { @MainActor in proactivity.onContextSwitch(frame) }
+                Task { @MainActor in mind.onContextSwitch(frame) }
             }
+            worldSync.mind = mind
+            knowledge.onFactsIngested = { facts in mind.factsExtracted(facts) }
 
             // Meeting transcription (opt-in): conferencing-gated capture → summary.
             let meetings = MeetingService(
@@ -97,8 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // Meeting key facts are model-generated, so they clear the
                     // same durability gate as extraction (explicit `remember`
                     // commands don't — a direct user instruction always wins).
-                    guard MemoryValidator.isDurable(fact) else { return }
-                    await memoryService.remember(fact)
+                    guard FactValidator.isDurable(fact) else { return }
+                    await knowledge.remember(fact)
                 })
             self.meetings = meetings
 
@@ -109,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 agent.screenBuffer.setPolicy(policy)
                 agent.screenBuffer.start() // no-op until Screen Recording is granted
             }
-            proactivity.start()
+            mind.start()
             meetings.start()
             Task {
                 let muted = ((try? await core.settings.get("proactive_muted", as: Bool.self)) ?? nil) ?? false

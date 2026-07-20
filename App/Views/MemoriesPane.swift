@@ -1,17 +1,23 @@
-import JMemory
+import JKnowledge
 import SwiftUI
 
 /// Memory pane: the active-memory list (search, inline rename, forget) with a
 /// toggle into the knowledge-graph explorer.
 struct MemoriesPane: View {
-    let store: MemoryStore
+    let store: KnowledgeStore
     var graphReader: GraphReader?
 
     private enum Mode { case list, graph }
 
-    @State private var mode: Mode = .list
+    @State private var mode: Mode
+
+    init(store: KnowledgeStore, graphReader: GraphReader? = nil, startInGraph: Bool = false) {
+        self.store = store
+        self.graphReader = graphReader
+        _mode = State(initialValue: startInGraph && graphReader != nil ? .graph : .list)
+    }
     @State private var query = ""
-    @State private var items: [MemoryStore.MemoryItem]?
+    @State private var items: [KnowledgeStore.FactItem]?
     @State private var editingID: String?
     @State private var draft: String = ""
 
@@ -114,16 +120,16 @@ struct MemoriesPane: View {
         }
     }
 
-    private func filtered(_ items: [MemoryStore.MemoryItem]) -> [MemoryStore.MemoryItem] {
+    private func filtered(_ items: [KnowledgeStore.FactItem]) -> [KnowledgeStore.FactItem] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return items }
-        return items.filter { $0.text.localizedCaseInsensitiveContains(q) || $0.kind.localizedCaseInsensitiveContains(q) }
+        return items.filter { $0.text.localizedCaseInsensitiveContains(q) }
     }
 
-    private func row(_ item: MemoryStore.MemoryItem) -> some View {
+    private func row(_ item: KnowledgeStore.FactItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                kindBadge(item.kind)
+                salienceBadge(item.salience)
                 Spacer()
                 Text(item.createdAt.formatted(.relative(presentation: .named)))
                     .font(.jarvisFootnote).monospacedDigit()
@@ -157,40 +163,33 @@ struct MemoriesPane: View {
         .background(RoundedRectangle(cornerRadius: JarvisRadius.card, style: .continuous).fill(Color.jarvisSurface))
     }
 
-    private func kindBadge(_ kind: String) -> some View {
-        Text(kind.uppercased())
+    private func salienceBadge(_ salience: Double) -> some View {
+        let (label, color): (String, Color) = salience >= 0.8
+            ? ("KEY", Color.jarvisAccent)
+            : salience <= 0.3 ? ("MINOR", Color.jarvisTextTertiary) : ("FACT", .teal)
+        return Text(label)
             .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(kindColor(kind))
+            .foregroundStyle(color)
             .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Capsule().fill(kindColor(kind).opacity(0.16)))
-    }
-
-    private func kindColor(_ kind: String) -> Color {
-        switch kind {
-        case "preference": .jarvisAccent
-        case "event": .orange
-        case "task": .jarvisWarning
-        case "insight": .purple
-        default: .teal // fact
-        }
+            .background(Capsule().fill(color.opacity(0.16)))
     }
 
     // MARK: - Actions
 
     private func reload() async { items = await store.list() }
 
-    private func beginEdit(_ item: MemoryStore.MemoryItem) {
+    private func beginEdit(_ item: KnowledgeStore.FactItem) {
         draft = item.text
         editingID = item.id
     }
 
-    private func commitEdit(_ item: MemoryStore.MemoryItem) {
+    private func commitEdit(_ item: KnowledgeStore.FactItem) {
         let text = draft
         editingID = nil
         Task { await store.update(id: item.id, text: text); await reload() }
     }
 
-    private func forget(_ item: MemoryStore.MemoryItem) {
+    private func forget(_ item: KnowledgeStore.FactItem) {
         if editingID == item.id { editingID = nil }
         Task { await store.archive(id: item.id); await reload() }
     }

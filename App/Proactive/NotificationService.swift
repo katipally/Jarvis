@@ -12,7 +12,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
 
     /// Fired on the main actor when the user clicks a proactive banner.
     var onActivate: (@MainActor () -> Void)?
-    /// Fired when the user dismisses a banner (feeds the funnel's dismissal backoff).
+    /// Fired when the user dismisses a banner (feeds facet learning as
+    /// behavioral evidence that notifications should be rarer).
     var onDismiss: (@MainActor () -> Void)?
 
     override init() {

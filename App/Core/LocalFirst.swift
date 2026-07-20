@@ -6,7 +6,7 @@ import JLocal
 /// Local-first model resolution (decision D3): on-device Foundation Models runs
 /// extraction, nudge gating, titles, summaries, and briefs for free/offline;
 /// the API aux/brain role is an optional quality upgrade or a fallback. One
-/// shared instance is injected into MemoryService, ProactivityService, and
+/// shared instance is injected into KnowledgeService, ProactivityService, and
 /// MeetingService so they never each stand up their own model plumbing.
 @MainActor
 final class LocalFirst {

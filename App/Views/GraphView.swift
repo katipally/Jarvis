@@ -1,4 +1,4 @@
-import JMemory
+import JKnowledge
 import SwiftUI
 
 /// Force-directed knowledge-graph explorer rendered with Canvas. Pan (drag the
@@ -6,14 +6,15 @@ import SwiftUI
 /// to inspect it — its relations plus the memories it appears in.
 struct GraphView: View {
     let reader: GraphReader
-    var memoryStore: MemoryStore?
+    var memoryStore: KnowledgeStore?
 
     @State private var snapshot = GraphReader.Snapshot(nodes: [], edges: [])
     @State private var positions: [String: CGPoint] = [:]
     @State private var velocities: [String: CGVector] = [:]
     @State private var selected: String?
-    @State private var relatedMemories: [RetrievedMemory] = []
+    @State private var relatedMemories: [RetrievedFact] = []
     @State private var includeHistory = false
+    @State private var typeFilter: Set<String> = []
     @State private var layout: Task<Void, Never>?
     @State private var query = ""
 
@@ -47,9 +48,10 @@ struct GraphView: View {
         }
         .task { await reload() }
         .onChange(of: includeHistory) { _, _ in Task { await reload() } }
+        .onChange(of: typeFilter) { _, _ in Task { await reload() } }
         .onChange(of: selected) { _, id in Task { await loadRelated(id) } }
         .onReceive(NotificationCenter.default.publisher(for: .jarvisGraphDidChange)) { _ in
-            // Posted on the main actor by MemoryStore, so it's safe to reload here.
+            // Posted on the main actor by KnowledgeStore, so it is safe to reload here.
             Task { await reload() }
         }
         .onDisappear { layout?.cancel() }
@@ -247,20 +249,38 @@ struct GraphView: View {
         relatedMemories = result
     }
 
-    /// Tiny kind→color key so the node colors are decodable at a glance.
+    /// Kind→color key doubling as filter chips: tap to isolate types.
     private var legend: some View {
         let kinds: [(String, String)] = [
             ("person", "People"), ("org", "Orgs"), ("project", "Projects"),
-            ("place", "Places"), ("artifact", "Artifacts"), ("other", "Other"),
+            ("place", "Places"), ("event", "Events"), ("topic", "Topics"), ("thing", "Things"),
         ]
         return HStack(spacing: 10) {
             ForEach(kinds, id: \.0) { kind, label in
-                HStack(spacing: 4) {
-                    Circle().fill(kindColor(kind)).frame(width: 6, height: 6)
-                    Text(label).font(.jarvisFootnote).foregroundStyle(Color.jarvisTextTertiary)
+                Button {
+                    if typeFilter.contains(kind) {
+                        typeFilter.remove(kind)
+                    } else {
+                        typeFilter.insert(kind)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Circle().fill(kindColor(kind)).frame(width: 6, height: 6)
+                        Text(label).font(.jarvisFootnote)
+                            .foregroundStyle(typeFilter.isEmpty || typeFilter.contains(kind)
+                                ? Color.jarvisTextSecondary : Color.jarvisTextTertiary.opacity(0.5))
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Filter \(label)")
             }
             Spacer()
+            if !typeFilter.isEmpty {
+                Button("All") { typeFilter = [] }
+                    .buttonStyle(.plain).font(.jarvisFootnote)
+                    .foregroundStyle(Color.jarvisAccent)
+            }
         }
         .padding(.horizontal, 4)
     }
@@ -337,8 +357,9 @@ struct GraphView: View {
         case "org": .orange
         case "project": .purple
         case "place": .jarvisSuccess
-        case "artifact": .pink
-        default: .teal
+        case "event": .pink
+        case "topic": .teal
+        default: .gray // thing
         }
     }
 
@@ -445,7 +466,15 @@ struct GraphView: View {
     }
 
     private func reload() async {
-        snapshot = await reader.snapshot(includeHistory: includeHistory)
+        var loaded = await reader.snapshot(includeHistory: includeHistory)
+        if !typeFilter.isEmpty {
+            let nodes = loaded.nodes.filter { typeFilter.contains($0.kind) }
+            let ids = Set(nodes.map(\.id))
+            loaded = GraphReader.Snapshot(
+                nodes: nodes,
+                edges: loaded.edges.filter { ids.contains($0.source) && ids.contains($0.target) })
+        }
+        snapshot = loaded
         if let selected, !snapshot.nodes.contains(where: { $0.id == selected }) {
             self.selected = nil
         }
