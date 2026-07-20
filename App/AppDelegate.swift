@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let pushToTalk = PushToTalkMonitor(voice: voice)
             chat.memory = knowledge
             chat.graphReader = GraphReader(database: database)
+            chat.localFirst = localFirst
             self.knowledgeStore = knowledgeStore
             self.knowledge = knowledge
 
@@ -74,6 +75,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.chat = chat
             self.voice = voice
             self.pushToTalk = pushToTalk
+
+            // Let "Ask Jarvis" (Siri / Spotlight / Shortcuts) reach the assistant.
+            JarvisIntentBridge.shared.answer = { [weak chat] question in
+                await chat?.oneShotAnswer(question) ?? "Jarvis isn't ready yet."
+            }
 
             self.sessions = sessions
             core.onSessionGapChange = { minutes in
@@ -146,18 +152,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
     }
 
+    /// Close the live segment on quit WITHOUT blocking the main thread. The old
+    /// code blocked on a DispatchSemaphore (up to 1s hang, and a slow write was
+    /// silently dropped). Here the runloop keeps turning via `.terminateLater`
+    /// while the close races a 2s cap; either way `recoverOrphanedSegments`
+    /// reconciles it on next launch, so quit can never hang on a stuck write.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let sessions else { return .terminateNow }
+        Task { @MainActor in
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await sessions.closeCurrentSegment() }
+                group.addTask { try? await Task.sleep(for: .seconds(2)) }
+                await group.next()   // whichever finishes first wins
+                group.cancelAll()
+            }
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         screenManager.stop()
-        // Best-effort: mark the live segment closed so history is truthful.
-        // Extraction for it runs on next launch via recoverOrphanedSegments.
-        if let sessions {
-            let semaphore = DispatchSemaphore(value: 0)
-            Task.detached {
-                await sessions.closeCurrentSegment()
-                semaphore.signal()
-            }
-            _ = semaphore.wait(timeout: .now() + 1)
-        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

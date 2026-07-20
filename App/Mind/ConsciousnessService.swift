@@ -686,6 +686,10 @@ final class ConsciousnessService {
         let runID = UUID().uuidString
         let runStore = agent.runStore
         await runStore.createRun(id: runID, kind: kind, segmentID: nil, initiator: "jarvis", label: label)
+        // Notch Live Activity: show that Jarvis is working in the background, and
+        // refine the label as each tool runs. Cleared on exit no matter how we return.
+        chat.liveActivity = ChatStore.LiveActivity(title: "Thinking", symbol: "sparkles")
+        defer { chat.liveActivity = nil }
         let loop = AgentLoop(
             adapter: resolved.adapter, tools: agent.tools, gate: agent.gate,
             config: .init(model: resolved.model, system: Self.backgroundSystem, effort: resolved.effort,
@@ -697,6 +701,7 @@ final class ConsciousnessService {
             switch event {
             case .assistantMessage(let m) where !m.plainText.isEmpty: text = m.plainText
             case .toolCallStarted(let id, let name, let input):
+                chat.liveActivity = ChatStore.activityLabel(forTool: name)
                 await runStore.toolStarted(id: id, runID: runID, name: name, input: input)
             case .toolCallFinished(let id, let output, let isError, let artifactID):
                 await runStore.toolFinished(id: id, state: isError ? "error" : "done", preview: output, artifactID: artifactID)

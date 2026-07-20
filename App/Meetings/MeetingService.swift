@@ -4,7 +4,7 @@ import JLocal
 import JSpeech
 import JStore
 import Observation
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// Opt-in meeting transcription. Watches for a native conferencing app becoming
 /// frontmost; when meetings are enabled it auto-starts on-device capture +

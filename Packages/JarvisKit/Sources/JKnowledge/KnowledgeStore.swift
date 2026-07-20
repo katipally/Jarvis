@@ -393,17 +393,39 @@ public struct KnowledgeStore: Sendable {
         public let text: String
         public let salience: Double
         public let createdAt: Date
+        /// Where this memory came from — the source world's display name
+        /// ("Mail", "Calendar", "Conversation"…), or nil if unknown. Provenance.
+        public var source: String?
     }
 
     /// Live facts, newest first.
     public func list(limit: Int = 200) async -> [FactItem] {
-        (try? await database.reader.read { db in
-            try FactRow
+        (try? await database.reader.read { db -> [FactItem] in
+            let facts = try FactRow
                 .filter(Column("superseded_by") == nil)
                 .order(Column("created_at").desc)
                 .limit(limit)
                 .fetchAll(db)
-                .map { FactItem(id: $0.id, text: $0.text, salience: $0.salience, createdAt: $0.createdAt) }
+            // Provenance: fact → source episode → world display name, in two
+            // batched lookups (no N+1).
+            let episodeIDs = Set(facts.compactMap { $0.episodeId })
+            var worldByEpisode: [String: String] = [:]
+            if !episodeIDs.isEmpty {
+                for e in try EpisodeRow.filter(keys: episodeIDs).fetchAll(db) {
+                    worldByEpisode[e.id] = e.worldId
+                }
+            }
+            var nameByWorld: [String: String] = [:]
+            let worldIDs = Set(worldByEpisode.values)
+            if !worldIDs.isEmpty {
+                for w in try WorldRow.filter(keys: worldIDs).fetchAll(db) {
+                    nameByWorld[w.id] = w.displayName
+                }
+            }
+            return facts.map { f in
+                let source = f.episodeId.flatMap { worldByEpisode[$0] }.flatMap { nameByWorld[$0] }
+                return FactItem(id: f.id, text: f.text, salience: f.salience, createdAt: f.createdAt, source: source)
+            }
         }) ?? []
     }
 
@@ -472,10 +494,13 @@ public struct KnowledgeStore: Sendable {
         public var facts = 0
         public var entities = 0
         public var edges = 0
+        /// False when on-device embedding assets aren't ready — recall is
+        /// keyword-only until they download. Surfaced in Settings.
+        public var semanticAvailable = true
     }
 
     public func stats() async -> Stats {
-        (try? await database.reader.read { db in
+        var s = (try? await database.reader.read { db in
             var s = Stats()
             s.episodesPending = try EpisodeRow.filter(Column("extraction_status") == "pending").fetchCount(db)
             s.episodesDone = try EpisodeRow.filter(Column("extraction_status") == "done").fetchCount(db)
@@ -484,6 +509,8 @@ public struct KnowledgeStore: Sendable {
             s.edges = try EdgeRow.filter(Column("invalidated_at") == nil).fetchCount(db)
             return s
         }) ?? Stats()
+        s.semanticAvailable = embedder.semanticAvailable
+        return s
     }
 }
 

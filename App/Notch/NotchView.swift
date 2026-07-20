@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// Ids for the elements that travel between a compact bar and the open header.
+enum MorphID {
+    static let camera = "morphCamera"
+    static let leftFlank = "morphLeftFlank"
+    static let rightFlank = "morphRightFlank"
+}
+
+extension View {
+    /// Applies a matched-geometry id only when travel is wanted (Reduce Motion
+    /// off), so the compact→open morph flows without breaking the reduced path.
+    @ViewBuilder
+    func morphAnchor(_ id: String, in ns: Namespace.ID, active: Bool) -> some View {
+        if active { matchedGeometryEffect(id: id, in: ns) } else { self }
+    }
+}
+
 struct NotchView: View {
     @Bindable var vm: NotchViewModel
     var core: JarvisCore?
@@ -10,6 +26,10 @@ struct NotchView: View {
     @State private var peekText: String?
     @State private var peekDismiss: Task<Void, Never>?
     @Namespace private var tabPillNamespace
+    /// Shared geometry namespace for the compact-bar → open morph: the camera
+    /// void and the left/right flanks physically travel into the tab header
+    /// (Dynamic Island grammar) instead of crossfading.
+    @Namespace private var morphNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isVoiceHost: Bool {
@@ -24,6 +44,11 @@ struct NotchView: View {
         return voice.isActive && vm.state == .closed
     }
 
+    // Nudges / meeting / working bars and onboarding render on the primary
+    // (built-in) display only. Making them follow the active display would mean
+    // tracking the mouse continuously — exactly the idle-CPU cost Step 6 removed
+    // — so the notch experience is deliberately anchored to the built-in notch.
+    // Voice is the one exception: it already follows the user via activeDisplayID.
     private var isPrimary: Bool { vm.displayID == CGMainDisplayID() }
 
     private var showsOnboarding: Bool {
@@ -32,12 +57,16 @@ struct NotchView: View {
 
     private var agentWorking: Bool { chat?.phase == .responding }
 
+    /// Jarvis is doing work the closed notch should reflect: a foreground response
+    /// (rare while closed) OR a background run's Live Activity.
+    private var isBusy: Bool { agentWorking || chat?.liveActivity != nil }
+
     /// The notch is closed but Jarvis is busy (answering, or an unread proactive
     /// nudge is waiting): show a dim, slow border pulse so activity is visible
     /// without opening the panel. Never fights the listening chrome.
     private var showsClosedActivity: Bool {
         vm.state == .closed && !showsListening
-            && (agentWorking || chat?.hasUnreadProactive == true)
+            && (isBusy || chat?.hasUnreadProactive == true)
     }
 
     /// Glow appears while the agent is working or the mic is listening (only on
@@ -47,7 +76,7 @@ struct NotchView: View {
     private var showsGlow: Bool {
         if showsClosedActivity { return true }
         guard isVoiceHost || vm.state == .open else { return false }
-        if agentWorking { return true }
+        if isBusy { return true }
         if chat?.hasUnreadProactive == true { return true }
         if let voice, voice.showsGlow { return true }
         return false
@@ -64,8 +93,15 @@ struct NotchView: View {
         reduceMotion ? .easeInOut(duration: 0.2) : NotchAnimation.tab
     }
 
-    private var sizeAnimation: Animation {
-        vm.state == .open ? openAnimation : closeAnimation
+    /// One spring for the whole morph: the bouncy open spring when expanding to a
+    /// panel, the more-damped close spring when collapsing to any compact/closed
+    /// presentation. This reproduces the old per-trigger open/close choice exactly
+    /// while letting a single `.animation(value: presentation)` drive everything.
+    private var morphAnimation: Animation {
+        switch presentation {
+        case .open, .onboarding: openAnimation
+        case .idle, .peek, .meeting, .working, .listening: closeAnimation
+        }
     }
 
     private var contentTransition: AnyTransition {
@@ -74,8 +110,12 @@ struct NotchView: View {
             : .scale(scale: 0.94, anchor: .top).combined(with: .opacity)
     }
 
-    private var topCornerRadius: CGFloat { vm.state == .open ? 20 : 6 }
-    private var bottomCornerRadius: CGFloat { vm.state == .open ? 26 : 14 }
+    private var topCornerRadius: CGFloat {
+        vm.state == .open ? NotchMetrics.cornerOpen.top : NotchMetrics.cornerClosed.top
+    }
+    private var bottomCornerRadius: CGFloat {
+        vm.state == .open ? NotchMetrics.cornerOpen.bottom : NotchMetrics.cornerClosed.bottom
+    }
 
     /// Live meeting indicator on the closed notch (primary display only, and
     /// never while the voice chrome owns the bar).
@@ -84,20 +124,28 @@ struct NotchView: View {
             && meetings?.isActive == true
     }
 
-    /// Background-run pulse: Jarvis is answering while the notch is closed.
+    /// Live Activity: Jarvis is working (usually a background run) while closed.
     private var showsWorkingBar: Bool {
         isPrimary && vm.state == .closed && !showsListening && peekText == nil
-            && !showsMeetingBar && agentWorking
+            && !showsMeetingBar && isBusy
     }
 
-    private var displayedSize: CGSize {
-        if showsOnboarding { return vm.onboardingSize }
-        if vm.state == .open { return vm.currentOpenContentSize }
-        if showsListening { return voice?.phase == .review ? vm.listeningReviewSize : vm.listeningSize }
-        if peekText != nil, isPrimary { return vm.listeningSize }
-        if showsMeetingBar || showsWorkingBar { return vm.closedStatusSize }
-        return vm.closedNotchSize
+    /// The single source of truth for what the notch is showing. Both the panel
+    /// size (below) and the rendered content (`bodyContent`) derive from this one
+    /// value via the same ladder, so they can never disagree. The ladder mirrors
+    /// the old guard precedence exactly: onboarding → open → listening → peek →
+    /// meeting → working → idle.
+    private var presentation: NotchPresentation {
+        if showsOnboarding { return .onboarding }
+        if vm.state == .open { return .open(vm.selectedTab) }
+        if showsListening, let voice { return .listening(voice.phase) }
+        if let peekText, isPrimary { return .peek(peekText) }
+        if showsMeetingBar { return .meeting }
+        if showsWorkingBar { return .working }
+        return .idle
     }
+
+    private var displayedSize: CGSize { vm.size(for: presentation) }
 
     var body: some View {
         // Fixed window: the black notch body scales within it from the top-center.
@@ -126,15 +174,17 @@ struct NotchView: View {
             }
             clippedBody
         }
-        .animation(sizeAnimation, value: vm.state)
-        .animation(tabAnimation, value: vm.selectedTab)
-        .animation(sizeAnimation, value: showsListening)
-        .animation(sizeAnimation, value: voice?.phase == .review)
-        .animation(sizeAnimation, value: peekText != nil)
-        .animation(sizeAnimation, value: showsMeetingBar)
-        .animation(sizeAnimation, value: showsWorkingBar)
-        .animation(tabAnimation, value: vm.homeBodyHeight) // answer-fitted growth
-        .animation(tabAnimation, value: vm.homeBrowsingHistory) // 30% reading height
+        // One morph timeline: every discrete presentation change (open/close, tab
+        // switch, listening/peek/meeting/working) animates on a single spring, so
+        // size, corner radii, and content stay locked together instead of racing
+        // across ten separate implicit animations.
+        .animation(morphAnimation, value: presentation)
+        // Continuous resize WITHIN .open(.home) rides its OWN timeline, never the
+        // morph — this isolation is the seam that keeps the HomeView measured-height
+        // loop from reoscillating (Step 4). homeBodyHeight/homeBrowsingHistory are
+        // deliberately not part of `presentation`.
+        .animation(tabAnimation, value: vm.homeBodyHeight)
+        .animation(tabAnimation, value: vm.homeBrowsingHistory)
         .animation(.easeInOut(duration: 0.35), value: showsGlow)
     }
 
@@ -159,33 +209,18 @@ struct NotchView: View {
             }
     }
 
+    /// The rendered content — a pure `switch` over the same `presentation` that
+    /// drives `displayedSize`, so what's shown and how big it is stay in lockstep.
     @ViewBuilder
     private var bodyContent: some View {
-        Group {
-            if showsOnboarding, let core {
-                OnboardingView(core: core)
-                    .padding(.horizontal, 30).padding(.top, 6).padding(.bottom, 16)
-            } else {
-                tabbedContent
-            }
-        }
-        .onChange(of: chat?.agent.presenter.current?.id) { _, newValue in
-            // The panel must never auto-close while an approval is pending —
-            // a timed-out prompt the user never saw is a silent deny.
-            vm.holdOpen = newValue != nil
-            if newValue != nil, vm.state == .closed, vm.screenFrame.contains(NSEvent.mouseLocation) {
-                withAnimation(openAnimation) { vm.open() }
-            }
-        }
-        .onChange(of: vm.state) { _, newState in
-            if newState == .open { chat?.markProactiveRead() }
-        }
-    }
-
-    @ViewBuilder
-    private var tabbedContent: some View {
         VStack(spacing: 0) {
-            if vm.state == .open {
+            switch presentation {
+            case .onboarding:
+                if let core {
+                    OnboardingView(core: core)
+                        .padding(.horizontal, 30).padding(.top, 6).padding(.bottom, 16)
+                }
+            case .open:
                 headerRow.frame(height: vm.closedNotchSize.height, alignment: .top)
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -205,21 +240,37 @@ struct NotchView: View {
                         withAnimation(closeAnimation) { vm.close() }
                     }
                     .transition(contentTransition)
-            } else if showsListening, let voice {
-                ListeningView(voice: voice, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height)
+            case .listening:
+                if let voice {
+                    ListeningView(voice: voice, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height, morphNamespace: morphNamespace)
+                        .transition(.opacity)
+                }
+            case .peek(let text):
+                ClosedPeekBar(text: text, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height, morphNamespace: morphNamespace)
                     .transition(.opacity)
-            } else if let peekText, isPrimary, vm.state == .closed {
-                ClosedPeekBar(text: peekText, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height)
+            case .meeting:
+                if let meetings {
+                    ClosedMeetingBar(meetings: meetings, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height, morphNamespace: morphNamespace)
+                        .transition(.opacity)
+                }
+            case .working:
+                ClosedWorkingBar(activity: chat?.liveActivity, cameraWidth: vm.closedNotchSize.width,
+                                 cameraHeight: vm.closedNotchSize.height, morphNamespace: morphNamespace)
                     .transition(.opacity)
-            } else if showsMeetingBar, let meetings {
-                ClosedMeetingBar(meetings: meetings, cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height)
-                    .transition(.opacity)
-            } else if showsWorkingBar {
-                ClosedWorkingBar(cameraWidth: vm.closedNotchSize.width, cameraHeight: vm.closedNotchSize.height)
-                    .transition(.opacity)
-            } else {
+            case .idle:
                 Color.black
             }
+        }
+        .onChange(of: chat?.agent.presenter.current?.id) { _, newValue in
+            // The panel must never auto-close while an approval is pending —
+            // a timed-out prompt the user never saw is a silent deny.
+            vm.holdOpen = newValue != nil
+            if newValue != nil, vm.state == .closed, vm.screenFrame.contains(NSEvent.mouseLocation) {
+                withAnimation(openAnimation) { vm.open() }
+            }
+        }
+        .onChange(of: vm.state) { _, newState in
+            if newState == .open { chat?.markProactiveRead() }
         }
         // Nudge peek: a fresh proactive message briefly expands the closed
         // notch with its first line (Dynamic Island grammar), then retracts.
@@ -258,11 +309,14 @@ struct NotchView: View {
                     tabButton(.home)
                     tabButton(.history)
                 }
-                Color.clear.frame(width: vm.closedNotchSize.width + 28)
+                .morphAnchor(MorphID.leftFlank, in: morphNamespace, active: !reduceMotion)
+                Color.clear.frame(width: vm.closedNotchSize.width + NotchMetrics.headerCameraReserve)
+                    .morphAnchor(MorphID.camera, in: morphNamespace, active: !reduceMotion)
                 HStack(spacing: 22) {
                     tabButton(.activity)
                     tabButton(.settings)
                 }
+                .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
                 Spacer(minLength: 0)
             }
             .padding(.top, 2)
@@ -339,6 +393,8 @@ private struct ClosedPeekBar: View {
     let text: String
     let cameraWidth: CGFloat
     let cameraHeight: CGFloat
+    let morphNamespace: Namespace.ID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 1) {
@@ -347,11 +403,14 @@ private struct ClosedPeekBar: View {
                     .font(.system(size: 9))
                     .foregroundStyle(Color.jarvisLink)
                     .frame(maxWidth: .infinity)
-                Color.clear.frame(width: cameraWidth + 22)
+                    .morphAnchor(MorphID.leftFlank, in: morphNamespace, active: !reduceMotion)
+                Color.clear.frame(width: cameraWidth + NotchMetrics.cameraSideReserve)
+                    .morphAnchor(MorphID.camera, in: morphNamespace, active: !reduceMotion)
                 Image(systemName: "sparkles")
                     .font(.system(size: 9))
                     .foregroundStyle(.white.opacity(0.6))
                     .frame(maxWidth: .infinity)
+                    .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
             }
             .frame(height: cameraHeight)
 
@@ -373,6 +432,7 @@ private struct ClosedMeetingBar: View {
     let meetings: MeetingService
     let cameraWidth: CGFloat
     let cameraHeight: CGFloat
+    let morphNamespace: Namespace.ID
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -385,13 +445,16 @@ private struct ClosedMeetingBar: View {
                     .foregroundStyle(.white.opacity(0.75))
             }
             .frame(maxWidth: .infinity)
-            Color.clear.frame(width: cameraWidth + 22)
+            .morphAnchor(MorphID.leftFlank, in: morphNamespace, active: !reduceMotion)
+            Color.clear.frame(width: cameraWidth + NotchMetrics.cameraSideReserve)
+                .morphAnchor(MorphID.camera, in: morphNamespace, active: !reduceMotion)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(elapsed(at: context.date))
                     .font(.system(size: 10, weight: .medium)).monospacedDigit()
                     .foregroundStyle(.white.opacity(0.75))
             }
             .frame(maxWidth: .infinity)
+            .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
         }
         .frame(height: cameraHeight)
         .accessibilityElement(children: .combine)
@@ -427,26 +490,48 @@ private struct PulsingDot: View {
 
 /// Closed-notch background-run pulse: Jarvis is answering while closed.
 private struct ClosedWorkingBar: View {
+    var activity: ChatStore.LiveActivity?
     let cameraWidth: CGFloat
     let cameraHeight: CGFloat
+    let morphNamespace: Namespace.ID
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var title: String { activity?.title ?? "Working" }
+
     var body: some View {
-        HStack(spacing: 0) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 9))
-                .foregroundStyle(.white.opacity(0.75))
-                .symbolEffect(.pulse, isActive: !reduceMotion)
+        VStack(spacing: 1) {
+            HStack(spacing: 0) {
+                Image(systemName: activity?.symbol ?? "sparkles")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .symbolEffect(.pulse, isActive: !reduceMotion)
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(maxWidth: .infinity)
+                    .morphAnchor(MorphID.leftFlank, in: morphNamespace, active: !reduceMotion)
+                Color.clear.frame(width: cameraWidth + NotchMetrics.cameraSideReserve)
+                    .morphAnchor(MorphID.camera, in: morphNamespace, active: !reduceMotion)
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(maxWidth: .infinity)
+                    .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
+            }
+            .frame(height: cameraHeight)
+
+            // The Live Activity's per-step label, below the camera cutout.
+            Text(title)
+                .font(.jarvisCaption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
                 .frame(maxWidth: .infinity)
-            Color.clear.frame(width: cameraWidth + 22)
-            ProgressView()
-                .controlSize(.mini)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
+                .contentTransition(.opacity)
         }
-        .frame(height: cameraHeight)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Jarvis is working")
+        .accessibilityLabel("Jarvis: \(title)")
+        // Crossfade the label + swap the symbol as each tool step refines the
+        // activity, so the Live Activity updates smoothly instead of snapping.
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: title)
     }
 }
 

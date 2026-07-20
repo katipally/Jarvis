@@ -17,6 +17,8 @@ struct DisplayMessage: Identifiable, Equatable {
     var isError: Bool = false
     var toolName: String? = nil
     var toolState: ToolState? = nil
+    /// A Jarvis-initiated (proactive) message the user can act on inline.
+    var isProactive: Bool = false
 }
 
 extension DisplayMessage {
@@ -89,6 +91,36 @@ final class ChatStore {
     var graphReader: GraphReader?
     /// World-sync engine, surfaced so Settings can render the Sources section.
     var worlds: WorldSyncEngine?
+    /// On-device-first model (local → aux → brain). Used for compaction so the
+    /// summary is generated for free/offline when the on-device model is present.
+    var localFirst: LocalFirst?
+
+    /// A glanceable "what Jarvis is doing right now" for the closed notch — the
+    /// notch's Live Activity. Set while a BACKGROUND run is in flight (foreground
+    /// runs show the open panel instead), updated per tool step, cleared on done.
+    struct LiveActivity: Equatable {
+        var title: String
+        var symbol: String
+    }
+    var liveActivity: LiveActivity?
+
+    /// Friendly, user-facing label for a tool while it runs — never the raw tool
+    /// name. Drives the notch Live Activity's per-step text.
+    static func activityLabel(forTool name: String) -> LiveActivity {
+        switch name {
+        case "search_memory", "recall_screen": LiveActivity(title: "Recalling", symbol: "brain")
+        case "search_screen", "fetch_frames", "take_screenshot", "ui_snapshot":
+            LiveActivity(title: "Reviewing your screen", symbol: "eye")
+        case "calendar_list", "calendar_add_event": LiveActivity(title: "Checking your calendar", symbol: "calendar")
+        case "reminders_list", "reminders_add": LiveActivity(title: "Checking reminders", symbol: "checklist.checked")
+        case "mail_send": LiveActivity(title: "Drafting mail", symbol: "envelope")
+        case "notes_create": LiveActivity(title: "Writing a note", symbol: "note.text")
+        case "fetch_url", "open_url": LiveActivity(title: "Reading the web", symbol: "globe")
+        case "schedule_task", "list_scheduled_tasks", "cancel_scheduled_task":
+            LiveActivity(title: "Managing your schedule", symbol: "clock")
+        default: LiveActivity(title: "Working", symbol: "sparkles")
+        }
+    }
     /// Rendered Active-facet lines ("how the user likes things"), maintained by
     /// ConsciousnessService after each rebuild; rides in the per-turn context.
     var facets: String?
@@ -224,7 +256,9 @@ final class ChatStore {
 
         let runID = UUID().uuidString
         let artifactStore = agent.artifactStore
-        let tools = agent.tools
+        // Private mode restricts the agent to read-only tools — it can gather
+        // context but never act on the world.
+        let tools = core.privateMode ? agent.tools.readOnlyOnly() : agent.tools
         let gate = agent.gate
         let runStore = agent.runStore
         let sessions = self.sessions
@@ -417,7 +451,8 @@ final class ChatStore {
         guard let plan = TranscriptCompactor.plan(transcript, contextLimit: limit, toolSchemas: agent.tools.schemas)
         else { return }
 
-        // ponytail: aux/brain summarizes; Phase 3 puts the local model first.
+        // Local-first: the on-device model summarizes for free/offline, falling
+        // back to aux/brain only when it isn't available (LocalFirst.text).
         let summary = await summarize(plan.middle)
             ?? "Earlier conversation: \(plan.middle.count) turns omitted to fit the context window."
         let summaryText = "[Conversation summary]\n\(summary)"
@@ -426,17 +461,22 @@ final class ChatStore {
     }
 
     private func summarize(_ middle: [NeutralMessage]) async -> String? {
+        let instructions = """
+        Summarize this conversation history compactly for the assistant's own memory. \
+        Keep: the user's goals, decisions made, facts learned, tool findings, and \
+        unresolved threads. Omit pleasantries. Plain prose, no preamble.
+        """
+        let rendered = TranscriptCompactor.renderForSummary(middle)
+
+        // On-device first, aux/brain fallback — all handled by LocalFirst.text.
+        if let localFirst {
+            return await localFirst.text(instructions: instructions, prompt: rendered, maxTokens: 500)
+        }
+
+        // LocalFirst not wired: fall back to the aux/brain API directly.
         guard let resolved = core.resolve(.aux) ?? core.resolve(.brain) else { return nil }
-        let request = ModelRequest(
-            model: resolved.model,
-            system: """
-            Summarize this conversation history compactly for the assistant's own memory. \
-            Keep: the user's goals, decisions made, facts learned, tool findings, and \
-            unresolved threads. Omit pleasantries. Plain prose, no preamble.
-            """,
-            messages: [.user(TranscriptCompactor.renderForSummary(middle))],
-            maxTokens: 500
-        )
+        let request = ModelRequest(model: resolved.model, system: instructions,
+                                   messages: [.user(rendered)], maxTokens: 500)
         let engine = ChatEngine(adapter: resolved.adapter)
         var text = ""
         for await event in engine.run(request) {
@@ -444,6 +484,22 @@ final class ChatStore {
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// A one-shot, memory-grounded answer for AppIntents (Siri / Spotlight /
+    /// Shortcuts): no tools, no notch UI, safe to run in the background. Uses the
+    /// same recall + local-first model path as the main chat, so "Ask Jarvis"
+    /// anywhere gets an answer grounded in your memory.
+    func oneShotAnswer(_ question: String) async -> String {
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return "Ask me something." }
+        // Show a notch Live Activity while answering an ambient (Siri/Spotlight) ask.
+        liveActivity = LiveActivity(title: "Thinking", symbol: "sparkles")
+        defer { liveActivity = nil }
+        let recalled = await memory?.context(for: q) ?? nil
+        let system = Self.systemPrompt + (recalled.map { "\n\n<context>\n\($0)\n</context>" } ?? "")
+        return await localFirst?.text(instructions: system, prompt: q, maxTokens: 800)
+            ?? "I couldn't answer that — check that a model is configured in Jarvis Settings."
     }
 
     func addAttachment(_ attachment: Attachment) { attachments.append(attachment) }
@@ -468,8 +524,31 @@ final class ChatStore {
         queuedProactive = []
     }
 
+    /// Follow up on a proactive nudge ("Tell me more") — sends a message and
+    /// clears the nudge's inline actions.
+    func askFollowUp(_ text: String, from messageID: String) {
+        guard phase != .responding else { return }
+        clearProactiveFlag(messageID)
+        input = text
+        send()
+    }
+
+    /// Dismiss a proactive nudge's inline actions without replying.
+    func dismissProactive(_ messageID: String) {
+        clearProactiveFlag(messageID)
+        markProactiveRead()
+    }
+
+    private func clearProactiveFlag(_ id: String) {
+        if let i = messages.firstIndex(where: { $0.id == id }) {
+            messages[i].isProactive = false
+        }
+    }
+
     private func deliverProactive(_ text: String) {
-        messages.append(DisplayMessage(id: UUID().uuidString, role: .assistant, text: text))
+        var proactive = DisplayMessage(id: UUID().uuidString, role: .assistant, text: text)
+        proactive.isProactive = true
+        messages.append(proactive)
         transcript.append(.assistant(text))
         hasUnreadProactive = true
         latestProactiveText = text
@@ -601,7 +680,7 @@ final class ChatStore {
 /// Event-flow diagnostics: appends one line per AgentEvent to the file named by
 /// JARVIS_CHAT_LOG. Inert in normal runs.
 enum ChatDebugLog {
-    nonisolated(unsafe) private static let handle: FileHandle? = {
+    private static let handle: FileHandle? = {
         guard let path = ProcessInfo.processInfo.environment["JARVIS_CHAT_LOG"] else { return nil }
         FileManager.default.createFile(atPath: path, contents: nil)
         return FileHandle(forWritingAtPath: path)

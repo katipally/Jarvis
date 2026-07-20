@@ -42,7 +42,7 @@ final class NotchScreenManager {
     /// System agents that present permission/auth dialogs. While one of these is
     /// frontmost, panels drop below dialog level so the prompt is never hidden
     /// behind the notch.
-    private static let systemDialogAgents: Set<String> = [
+    private nonisolated static let systemDialogAgents: Set<String> = [
         "com.apple.UserNotificationCenter",   // TCC permission alerts
         "com.apple.SecurityAgent",            // keychain / authorization
         "com.apple.coreservices.uiagent",     // gatekeeper & consent prompts
@@ -91,6 +91,17 @@ final class NotchScreenManager {
             }
         }
 
+        // Pointer monitors are installed lazily (see updateMouseMonitors): while
+        // the notch is closed there is nothing to auto-close, so nothing tracks
+        // the mouse and idle CPU stays at ~0%.
+    }
+
+    /// The pointer monitors drive ONE thing — auto-close — which only matters
+    /// while a panel is open. Hover-to-open is handled by SwiftUI, so closed =
+    /// no mouse tracking = ~0% idle CPU. Installed on the first open, removed
+    /// when the last panel closes (via each view-model's onStateChange).
+    private func installMouseMonitors() {
+        guard mouseMonitors.isEmpty else { return }
         // SwiftUI onHover can miss exit events during animated resizes, so the
         // real pointer position is the authoritative close signal. Throttle
         // before the actor hop — this fires for every pointer move on screen.
@@ -102,10 +113,29 @@ final class NotchScreenManager {
             mouseMonitors.append(global)
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved, handler: { [weak self] event in
-            MainActor.assumeIsolated { self?.pointerMoved() }
+            // Hop off the handler stack: closing the last panel removes these
+            // monitors synchronously, and removing a monitor from inside its own
+            // handler is unsafe.
+            Task { @MainActor in self?.pointerMoved() }
             return event
         }) {
             mouseMonitors.append(local)
+        }
+    }
+
+    private func removeMouseMonitors() {
+        for monitor in mouseMonitors { NSEvent.removeMonitor(monitor) }
+        mouseMonitors.removeAll()
+        outsideRecheckTask?.cancel()
+        outsideSince.removeAll()
+    }
+
+    /// Keep the monitors installed exactly while at least one panel is open.
+    private func updateMouseMonitors() {
+        if panels.values.contains(where: { $0.vm.state == .open }) {
+            installMouseMonitors()
+        } else {
+            removeMouseMonitors()
         }
     }
 
@@ -170,6 +200,7 @@ final class NotchScreenManager {
         let root = NotchView(vm: vm, core: core, chat: chat, voice: voice, meetings: meetings)
         window.contentView = NotchHostingView(rootView: root)
         vm.attach(window: window)
+        vm.onStateChange = { [weak self] in self?.updateMouseMonitors() }
         window.orderFrontRegardless()
         return Panel(window: window, vm: vm)
     }

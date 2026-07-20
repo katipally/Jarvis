@@ -105,6 +105,23 @@ private struct KnowledgeSection: View {
                     .foregroundStyle(Color.jarvisAccent)
                     .disabled(draining || current.episodesPending == 0)
                 }
+                if !current.semanticAvailable {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.jarvisCaption).foregroundStyle(Color.jarvisWarning)
+                        Text("Semantic recall is off — the on-device embedding model isn't ready, so memory search is keyword-only for now.")
+                            .font(.jarvisCaption).foregroundStyle(Color.jarvisTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button("Retry") {
+                            Task {
+                                await knowledge.store.reembedMissing()
+                                stats = await knowledge.store.stats()
+                            }
+                        }
+                        .buttonStyle(.plain).font(.jarvisCaption).foregroundStyle(Color.jarvisAccent)
+                    }
+                }
             } else {
                 JarvisLoadingState()
             }
@@ -145,6 +162,7 @@ struct SettingsView: View {
                 providersSection
                 rolesSection
                 sessionsSection
+                privacySection
                 ProactivitySettings(settings: core.settings)
                 ScreenRewindSection(settings: core.settings, screenBuffer: screenBuffer)
                 meetingsSection
@@ -203,6 +221,33 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
                 .tint(.white)
                 .fixedSize()
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.jarvisSurface))
+        }
+    }
+
+    // MARK: - Privacy
+
+    private var privacySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            JarvisSectionHeader(title: "Privacy")
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Private mode")
+                        .font(.jarvisBody).foregroundStyle(.white.opacity(0.85))
+                    Text("Jarvis can read your context to answer, but can't act on the world — no sending mail, writing files, or controlling apps.")
+                        .font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { core.privateMode },
+                    set: { on in Task { await core.setPrivateMode(on) } }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(Color.jarvisAccent)
             }
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.jarvisSurface))

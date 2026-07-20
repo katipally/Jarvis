@@ -23,7 +23,7 @@ struct ArtifactStore: Sendable {
             filename: "\(toolName)-output.txt", mime: "text/plain",
             bytes: content.utf8.count, preview: String(content.prefix(200))
         )
-        _ = try? await database.writer.write { try row.insert($0) }
+        await database.loggingWrite("artifact.spill") { try row.insert($0) }
         return ("artifact:\(id)", id)
     }
 

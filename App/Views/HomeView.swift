@@ -152,7 +152,11 @@ struct HomeView: View {
                                     message: message,
                                     onRetry: (message.role == .assistant && chat.canRetry
                                               && message.id == chat.latestAssistant?.id)
-                                        ? { chat.retryLast() } : nil
+                                        ? { chat.retryLast() } : nil,
+                                    onFollowUp: message.isProactive
+                                        ? { chat.askFollowUp("Tell me more about that.", from: message.id) } : nil,
+                                    onDismiss: message.isProactive
+                                        ? { chat.dismissProactive(message.id) } : nil
                                 )
                             }
                         }
@@ -438,6 +442,9 @@ struct MessageRow: View {
     let message: DisplayMessage
     /// "Try again" — re-sends the exchange; only set on Home's last assistant row.
     var onRetry: (() -> Void)? = nil
+    /// Inline actions for a proactive nudge (Tell me more / Dismiss).
+    var onFollowUp: (() -> Void)? = nil
+    var onDismiss: (() -> Void)? = nil
 
     /// Reasoning timing, measured live from this row's stream (nil for restored
     /// history, where the elapsed time can't be reconstructed).
@@ -503,6 +510,20 @@ struct MessageRow: View {
                         }
                 } else if message.isStreaming {
                     ThinkingDots()
+                }
+                if message.isProactive, onFollowUp != nil {
+                    HStack(spacing: 12) {
+                        Button { onFollowUp?() } label: {
+                            Label("Tell me more", systemImage: "arrow.turn.down.right").font(.jarvisCaption)
+                        }
+                        .buttonStyle(.plain).foregroundStyle(Color.jarvisAccent).pointerStyle(.link)
+                        Button { onDismiss?() } label: {
+                            Text("Dismiss").font(.jarvisCaption)
+                        }
+                        .buttonStyle(.plain).foregroundStyle(Color.jarvisTextTertiary).pointerStyle(.link)
+                    }
+                    .padding(.top, 2)
+                    .transition(.opacity)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

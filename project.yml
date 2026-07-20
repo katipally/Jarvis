@@ -52,7 +52,7 @@ targets:
         INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: "Jarvis reads and adds reminders when you ask it to."
         INFOPLIST_KEY_NSAppleEventsUsageDescription: "Jarvis controls apps like Mail and Notes on your behalf when you ask it to."
         SWIFT_VERSION: "6.0"
-        ENABLE_APP_INTENTS_METADATA_GENERATION: NO
+        ENABLE_APP_INTENTS_METADATA_GENERATION: YES
         CODE_SIGN_STYLE: Automatic
         # Stable signing identity: keeps the app's designated requirement the
         # same across rebuilds, so Keychain access survives (no re-prompts) and

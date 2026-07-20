@@ -50,22 +50,4 @@ public struct GraphReader: Sendable {
         }) ?? Snapshot(nodes: [], edges: [])
     }
 
-    /// Facts sourced by / superseding around an entity — the provenance chain
-    /// for the node inspector. Returns "src rel dst" lines plus source facts.
-    public func neighborhood(entityID: String, limit: Int = 12) async -> [String] {
-        (try? await database.reader.read { db -> [String] in
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT s.name AS srcName, e.rel AS rel, d.name AS dstName
-                FROM edge e
-                JOIN entity s ON s.id = e.src_id
-                JOIN entity d ON d.id = e.dst_id
-                WHERE (e.src_id = ? OR e.dst_id = ?) AND e.invalidated_at IS NULL
-                ORDER BY e.created_at DESC LIMIT ?
-                """, arguments: [entityID, entityID, limit])
-            return rows.map {
-                let rel: String = $0["rel"]
-                return "\($0["srcName"] as String) \(rel.replacingOccurrences(of: "_", with: " ")) \($0["dstName"] as String)"
-            }
-        }) ?? []
-    }
 }

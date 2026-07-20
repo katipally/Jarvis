@@ -6,6 +6,8 @@ struct ListeningView: View {
     let voice: VoiceController
     let cameraWidth: CGFloat
     let cameraHeight: CGFloat
+    let morphNamespace: Namespace.ID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 1) {
@@ -16,7 +18,9 @@ struct ListeningView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.trailing, 8)
                     .accessibilityHidden(true)
-                Color.clear.frame(width: cameraWidth + 22)
+                    .morphAnchor(MorphID.leftFlank, in: morphNamespace, active: !reduceMotion)
+                Color.clear.frame(width: cameraWidth + NotchMetrics.cameraSideReserve)
+                    .morphAnchor(MorphID.camera, in: morphNamespace, active: !reduceMotion)
                 Group {
                     if voice.phase == .processing {
                         ProgressView().controlSize(.mini)
@@ -28,6 +32,7 @@ struct ListeningView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
+                .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
             }
             .frame(height: cameraHeight)
 

@@ -60,11 +60,11 @@ final class WorldSyncEngine {
                 ScreenWorld(database: database)
             },
         ]
-        // Watched folders read their path list from settings; the real
-        // connector is built per-sync in sync() — this is a placeholder.
-        sources["folders"] = Source(kind: "llm_text", name: "Folders", cadence: 600, needsFDA: false) {
-            FolderWorld(paths: [])
-        }
+        // NOTE: the FolderWorld connector (watch md/txt folders → episodes) is
+        // built and tested in JWorlds, but intentionally NOT registered here yet
+        // — it needs a real folder-picker UI + settings-backed path list before
+        // it's a user feature. Wire it when that UI ships, rather than leaving a
+        // dead placeholder that watches nothing.
     }
 
     func start() async {

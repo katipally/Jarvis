@@ -1,6 +1,22 @@
 import AppKit
 import Observation
 
+/// The single, authoritative description of what the notch is showing right now.
+/// Both the panel size and the rendered content derive from this one value, so
+/// they can never disagree (the old code reconstructed state from ~7 booleans in
+/// two parallel `if`-chains that could drift apart). `NotchViewModel.state`
+/// (closed/open) remains the authoritative toggle; this is *derived* from it plus
+/// the live service state, via a priority ladder in `NotchView`.
+enum NotchPresentation: Equatable {
+    case idle                              // closed, nothing active
+    case onboarding                        // first run (primary display)
+    case open(NotchViewModel.Tab)          // expanded panel
+    case listening(VoiceController.Phase)  // voice chrome (listening/processing/review)
+    case peek(String)                      // proactive nudge, first line
+    case meeting                           // live-meeting status bar
+    case working                           // background-run pulse bar
+}
+
 @MainActor
 @Observable
 final class NotchViewModel {
@@ -45,14 +61,23 @@ final class NotchViewModel {
     @ObservationIgnored private weak var window: NSWindow?
     @ObservationIgnored private var openedAt: Date?
     @ObservationIgnored private var hoverOpenTask: Task<Void, Never>?
+    /// Fired after every open/close so the screen manager can install the pointer
+    /// monitors only while a panel is open (→ zero mouse tracking while idle).
+    @ObservationIgnored var onStateChange: (() -> Void)?
 
-    static let shadowPadding: CGFloat = 22
+    private static let homeBodyHeightKey = "jarvis.homeBodyHeight"
 
     init(screen: NSScreen) {
         displayID = screen.jarvisDisplayID
         screenFrame = screen.frame
         hasPhysicalNotch = screen.safeAreaInsets.top > 0
         closedNotchSize = Self.computeClosedNotchSize(for: screen)
+        // Seed the last-known Home height so the first open after launch morphs
+        // straight to the right size instead of jumping min → measured. The
+        // HomeView measure loop corrects it on mount if the answer differs.
+        if let saved = UserDefaults.standard.object(forKey: Self.homeBodyHeightKey) as? Double {
+            homeBodyHeight = CGFloat(saved)
+        }
     }
 
     // MARK: - Per-tab sizing
@@ -100,6 +125,20 @@ final class NotchViewModel {
 
     var currentOpenContentSize: CGSize { openContentSize(for: selectedTab) }
 
+    /// The panel size for a presentation — the single sizing authority. Content
+    /// (in NotchView) switches on the same value, so size and content stay locked.
+    func size(for presentation: NotchPresentation) -> CGSize {
+        switch presentation {
+        case .onboarding: onboardingSize
+        case .open(let tab): openContentSize(for: tab)
+        case .listening(let phase): phase == .review ? listeningReviewSize : listeningSize
+        case .peek: listeningSize
+        case .meeting: closedStatusSize
+        case .working: listeningSize   // taller: holds the Live Activity title line
+        case .idle: closedNotchSize
+        }
+    }
+
     /// First-run onboarding size (primary display only).
     var onboardingSize: CGSize {
         CGSize(width: clamp(screenFrame.width * 0.42, 560, 700), height: clamp(screenFrame.height * 0.46, 380, 540))
@@ -108,19 +147,20 @@ final class NotchViewModel {
     /// Compact size shown while listening: waveform flanks the camera on the top
     /// row, the transcript sits on one line BELOW the camera cutout.
     var listeningSize: CGSize {
-        CGSize(width: clamp(closedNotchSize.width + 200, 340, 400), height: closedNotchSize.height + 26)
+        CGSize(width: clamp(closedNotchSize.width + NotchMetrics.listeningExtraWidth, 340, 400),
+               height: closedNotchSize.height + NotchMetrics.listeningExtraHeight)
     }
 
     /// Listening size grown for the dictation-review state: the full transcript
     /// plus the send/cancel pair.
     var listeningReviewSize: CGSize {
-        CGSize(width: listeningSize.width, height: closedNotchSize.height + 96)
+        CGSize(width: listeningSize.width, height: closedNotchSize.height + NotchMetrics.reviewExtraHeight)
     }
 
     /// Slim closed-notch status bar (meeting timer, background-run pulse):
     /// camera-row height only, widened so the flanks can hold an icon + timer.
     var closedStatusSize: CGSize {
-        CGSize(width: clamp(closedNotchSize.width + 150, 300, 360), height: closedNotchSize.height)
+        CGSize(width: clamp(closedNotchSize.width + NotchMetrics.statusExtraWidth, 300, 360), height: closedNotchSize.height)
     }
 
     /// The window is fixed at the largest a tab can ever need; only the inner
@@ -135,8 +175,8 @@ final class NotchViewModel {
 
     var windowSize: CGSize {
         CGSize(
-            width: maxOpenContentSize.width + Self.shadowPadding * 2,
-            height: maxOpenContentSize.height + Self.shadowPadding
+            width: maxOpenContentSize.width + NotchMetrics.shadowPadding * 2,
+            height: maxOpenContentSize.height + NotchMetrics.shadowPadding
         )
     }
 
@@ -184,6 +224,7 @@ final class NotchViewModel {
         guard state != .open else { return }
         state = .open
         openedAt = .now
+        onStateChange?()
     }
 
     func close() {
@@ -191,6 +232,11 @@ final class NotchViewModel {
         guard state != .closed else { return }
         state = .closed
         openedAt = nil
+        // Persist the settled Home height to seed the next launch's first open.
+        if let homeBodyHeight {
+            UserDefaults.standard.set(Double(homeBodyHeight), forKey: Self.homeBodyHeightKey)
+        }
+        onStateChange?()
     }
 
     /// True while something must stay on screen regardless of the pointer
@@ -231,8 +277,8 @@ final class NotchViewModel {
     }
 
     private static func computeClosedNotchSize(for screen: NSScreen) -> CGSize {
-        var notchWidth: CGFloat = 185
-        var notchHeight: CGFloat = 32
+        var notchWidth = NotchMetrics.fallbackClosedSize.width
+        var notchHeight = NotchMetrics.fallbackClosedSize.height
 
         if let left = screen.auxiliaryTopLeftArea?.width,
            let right = screen.auxiliaryTopRightArea?.width {

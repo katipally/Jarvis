@@ -8,14 +8,14 @@ struct RunStore: Sendable {
     let database: JarvisDatabase
 
     func createRun(id: String, kind: String, segmentID: String?, initiator: String?, label: String? = nil) async {
-        _ = try? await database.writer.write { db in
+        await database.loggingWrite("run.create") { db in
             try RunRow(id: id, kind: kind, segmentId: segmentID, initiator: initiator,
                        status: "running", label: label).insert(db)
         }
     }
 
     func finishRun(id: String, status: String, usage: Usage, error: String?, costUSD: Double? = nil) async {
-        _ = try? await database.writer.write { db in
+        await database.loggingWrite("run.finish") { db in
             guard var row = try RunRow.fetchOne(db, key: id) else { return }
             row.status = status
             row.endedAt = .now
@@ -29,13 +29,13 @@ struct RunStore: Sendable {
     }
 
     func toolStarted(id: String, runID: String, name: String, input: JSONValue) async {
-        _ = try? await database.writer.write { db in
+        await database.loggingWrite("tool.start") { db in
             try ToolCallRow(id: id, runId: runID, name: name, inputJson: input.jsonString, state: "running").insert(db)
         }
     }
 
     func toolFinished(id: String, state: String, preview: String, artifactID: String? = nil) async {
-        _ = try? await database.writer.write { db in
+        await database.loggingWrite("tool.finish") { db in
             guard var row = try ToolCallRow.fetchOne(db, key: id) else { return }
             row.state = state
             row.outputPreview = String(preview.prefix(400))

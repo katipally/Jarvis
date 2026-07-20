@@ -56,8 +56,21 @@ public enum ScreenCapture {
             appBundleID: window.owningApplication?.bundleIdentifier,
             appName: window.owningApplication?.applicationName,
             windowTitle: window.title,
-            displayID: 0 // SCWindow doesn't expose its display; never a window id
+            // SCWindow doesn't expose its display, so resolve it from the window's
+            // center point (SCWindow.frame is in the CG global display space, which
+            // is exactly what CGGetDisplaysWithPoint expects).
+            displayID: Self.displayID(containing: window.frame)
         )
+    }
+
+    private static func displayID(containing frame: CGRect) -> Int {
+        var display = CGDirectDisplayID(0)
+        var count: UInt32 = 0
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        if CGGetDisplaysWithPoint(center, 1, &display, &count) == .success, count > 0 {
+            return Int(display)
+        }
+        return 0
     }
 
     static func encodeJPEG(_ image: CGImage) -> Data? {

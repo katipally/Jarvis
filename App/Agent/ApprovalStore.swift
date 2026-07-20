@@ -24,7 +24,7 @@ struct ApprovalStore: ApprovalRuleStore {
     }
 
     func rememberRule(tool: String, scopeKey: String?, allow: Bool) async {
-        _ = try? await database.writer.write { db in
+        await database.loggingWrite("approval.rule") { db in
             try ApprovalRuleRow
                 .filter(Column("tool_name") == tool && Column("scope_key") == scopeKey)
                 .deleteAll(db)
@@ -35,7 +35,7 @@ struct ApprovalStore: ApprovalRuleStore {
     }
 
     func logDecision(request: ApprovalRequest, allowed: Bool, by: ApprovalDecider) async {
-        _ = try? await database.writer.write { db in
+        await database.loggingWrite("approval.event") { db in
             try ApprovalEventRow(
                 runId: request.runID, toolCallId: request.toolCallID, toolName: request.toolName,
                 summary: request.summary, allowed: allowed, decidedBy: by.rawValue

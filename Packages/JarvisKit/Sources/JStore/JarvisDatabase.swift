@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 
 /// Single entry point to the local store. One instance per app process.
 /// Binary payloads (frames, artifacts) live as files; the DB stores paths.
@@ -25,6 +26,27 @@ public final class JarvisDatabase: Sendable {
     }
 
     public var reader: any DatabaseReader { writer }
+
+    private static let writeLog = Logger(subsystem: "com.jarvis.app", category: "db-write")
+
+    /// A write that LOGS on failure instead of silently swallowing it (the
+    /// pervasive `_ = try? await writer.write { … }` pattern hid dropped writes
+    /// entirely). Use for non-critical persistence: never crash the app over a
+    /// dropped write, but never let one vanish unnoticed. Returns the block's
+    /// value, or nil if the write threw — inspect with `log show --predicate
+    /// 'category == "db-write"'`.
+    @discardableResult
+    public func loggingWrite<T: Sendable>(
+        _ label: String,
+        _ updates: @Sendable @escaping (Database) throws -> T
+    ) async -> T? {
+        do {
+            return try await writer.write(updates)
+        } catch {
+            Self.writeLog.error("write failed [\(label, privacy: .public)]: \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }
 
     static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
