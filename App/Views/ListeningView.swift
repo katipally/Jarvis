@@ -6,28 +6,27 @@ struct ListeningView: View {
     let voice: VoiceController
     let cameraWidth: CGFloat
     let cameraHeight: CGFloat
+    let morphNamespace: Namespace.ID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 1) {
-            // Top row is exactly the camera height; the waveform + mic flank the
-            // reserved camera cutout so nothing renders behind it.
+        VStack(spacing: 3) {
+            // Symmetric reactive bars mirror on both sides of the camera, tight to
+            // its edges, pulsing with your voice.
             HStack(spacing: 0) {
                 Waveform(level: voice.level, active: voice.phase == .listening)
-                    .frame(maxWidth: .infinity)
-                    .padding(.trailing, 8)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.trailing, 7)
                     .accessibilityHidden(true)
-                Color.clear.frame(width: cameraWidth + 22)
-                Group {
-                    if voice.phase == .processing {
-                        ProgressView().controlSize(.mini)
-                    } else {
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .symbolEffect(.pulse, isActive: voice.phase == .listening)
-                    }
-                }
-                .frame(maxWidth: .infinity)
+                    .morphAnchor(MorphID.leftFlank, in: morphNamespace, active: !reduceMotion)
+                Color.clear.frame(width: cameraWidth + NotchMetrics.cameraSideReserve)
+                    .morphAnchor(MorphID.camera, in: morphNamespace, active: !reduceMotion)
+                Waveform(level: voice.level, active: voice.phase == .listening)
+                    .scaleEffect(x: -1, y: 1) // mirror so the tall bars hug the camera
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 7)
+                    .accessibilityHidden(true)
+                    .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
             }
             .frame(height: cameraHeight)
 
@@ -52,14 +51,17 @@ struct ListeningView: View {
                     .padding(.bottom, 8)
                 }
             } else {
-                // Transcript sits below the camera cutout.
-                Text(displayText)
-                    .font(.jarvisCaption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 16)
+                // Below the camera: the hold-to-talk mic ring + live transcript.
+                HStack(spacing: 7) {
+                    HoldMicRing(active: voice.phase == .listening)
+                    Text(displayText)
+                        .font(.jarvisCaption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
             }
         }
     }
@@ -88,18 +90,19 @@ struct ListeningView: View {
     }
 }
 
-/// A symmetric bar waveform driven by the live audio level. With Reduce Motion
-/// on, the bars hold a static mid-height profile instead of animating.
+/// A voice-reactive bar cluster that ramps from short (outer edge) to tall
+/// (next to the camera), blue-tinted. Mirror it for the opposite flank. Holds a
+/// calm static profile under Reduce Motion or when not actively listening.
 private struct Waveform: View {
     let level: Float
     let active: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let barCount = 9
+    private let barCount = 6
 
     var body: some View {
-        if reduceMotion {
+        if reduceMotion || !active {
             bars { i in staticHeight(index: i) }
         } else {
             TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
@@ -113,27 +116,60 @@ private struct Waveform: View {
         HStack(spacing: 3) {
             ForEach(0..<barCount, id: \.self) { i in
                 Capsule()
-                    .fill(.white.opacity(0.85))
+                    .fill(Color.jarvisLink.opacity(active ? 0.95 : 0.5))
                     .frame(width: 2.5, height: height(i))
             }
         }
     }
 
+    /// Short at the outer edge → tall next to the camera (trailing bar).
+    private func ramp(_ index: Int) -> Double {
+        0.35 + 0.65 * (Double(index) / Double(max(1, barCount - 1)))
+    }
+
     private func staticHeight(index: Int) -> CGFloat {
         guard active else { return 3 }
-        let center = Double(barCount - 1) / 2
-        let distance = abs(Double(index) - center) / center
-        let falloff = 1.0 - distance * 0.6
-        return 3 + CGFloat(falloff) * 6
+        return 3 + CGFloat(ramp(index)) * 5
     }
 
     private func barHeight(index: Int, time: Double) -> CGFloat {
-        guard active else { return 3 }
-        let center = Double(barCount - 1) / 2
-        let distance = abs(Double(index) - center) / center
-        let falloff = 1.0 - distance * 0.6
         let wobble = 0.5 + 0.5 * sin(time * 6 + Double(index) * 0.9)
-        let amplitude = CGFloat(level) * falloff * wobble
-        return max(3, 3 + amplitude * 12)
+        let amplitude = CGFloat(level) * CGFloat(ramp(index)) * wobble
+        return max(3, 3 + amplitude * 13)
+    }
+}
+
+/// Hold-to-talk affordance: a mic with a rotating blue ring that makes 'I'm
+/// capturing' obvious while you hold. Calm (no ring) when idle; static ring
+/// under Reduce Motion.
+private struct HoldMicRing: View {
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            if active {
+                if reduceMotion {
+                    Circle().strokeBorder(Color.jarvisLink.opacity(0.8), lineWidth: 1.5)
+                } else {
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                        let a = context.date.timeIntervalSinceReferenceDate
+                            .truncatingRemainder(dividingBy: 1.6) / 1.6
+                        Circle()
+                            .strokeBorder(
+                                AngularGradient(colors: [.clear, Color.jarvisLink, .clear],
+                                                center: .center),
+                                lineWidth: 1.5
+                            )
+                            .rotationEffect(.degrees(a * 360))
+                    }
+                }
+            }
+            Image(systemName: "mic.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(active ? Color.jarvisLink : .white.opacity(0.7))
+                .symbolEffect(.pulse, isActive: active && !reduceMotion)
+        }
+        .frame(width: 20, height: 20)
     }
 }

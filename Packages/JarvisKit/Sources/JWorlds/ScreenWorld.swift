@@ -29,7 +29,7 @@ public struct ScreenWorld: WorldConnector {
         }
 
         let since = Date(timeIntervalSince1970: old.lastTs)
-        let frames = try await database.reader.read { db in
+        let frames = try database.reader.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT ts, app_name, window_title, ocr_text FROM screen_frame
                 WHERE ts > ? AND trigger = 'context_switch' AND ocr_status = 'done'

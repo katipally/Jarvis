@@ -16,9 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var knowledgeStore: KnowledgeStore?
     private var knowledge: KnowledgeService?
     private var worldSync: WorldSyncEngine?
-    private var mind: ConsciousnessService?
+    private var awareness: Awareness?
     private var notifications: NotificationService?
-    private var meetings: MeetingService?
     private var sessions: SessionManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -45,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let knowledgeStore = KnowledgeStore(database: database)
 
             // One shared on-device model + resolver + task store, used by
-            // knowledge, proactivity, and meetings (local-first, API optional).
+            // knowledge and proactivity (local-first, API optional).
             let localFirst = LocalFirst(local: LocalModel(), core: core)
             let taskStore = TaskStore(database: database)
 
@@ -60,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let pushToTalk = PushToTalkMonitor(voice: voice)
             chat.memory = knowledge
             chat.graphReader = GraphReader(database: database)
+            chat.localFirst = localFirst
             self.knowledgeStore = knowledgeStore
             self.knowledge = knowledge
 
@@ -74,6 +74,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.chat = chat
             self.voice = voice
             self.pushToTalk = pushToTalk
+
+            // Let "Ask Jarvis" (Siri / Spotlight / Shortcuts) reach the assistant.
+            JarvisIntentBridge.shared.answer = { [weak chat] question in
+                await chat?.oneShotAnswer(question) ?? "Jarvis isn't ready yet."
+            }
 
             self.sessions = sessions
             core.onSessionGapChange = { minutes in
@@ -91,44 +96,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             // The decision engine: heartbeat reflection + trigger pipeline +
-            // staged delivery + facet learning. Every verdict is logged.
+            // staged delivery. Every verdict is logged.
             let notifications = NotificationService()
             notifications.onActivate = { NSApp.activate(ignoringOtherApps: true) }
-            let mind = ConsciousnessService(
+            let awareness = Awareness(
                 core: core, chat: chat, agent: agent,
                 localFirst: localFirst, tasks: taskStore, notifications: notifications,
                 knowledge: knowledge, database: database)
-            self.mind = mind
+            self.awareness = awareness
             self.notifications = notifications
             agent.screenBuffer.onContextSwitch = { frame in
-                Task { @MainActor in mind.onContextSwitch(frame) }
+                Task { @MainActor in awareness.onContextSwitch(frame) }
             }
-            worldSync.mind = mind
-            knowledge.onFactsIngested = { facts in mind.factsExtracted(facts) }
+            worldSync.awareness = awareness
 
-            // Meeting transcription (opt-in): conferencing-gated capture → summary.
-            let meetings = MeetingService(
-                database: database, localFirst: localFirst, taskStore: taskStore,
-                settings: core.settings,
-                receiveProactive: { body in chat.receiveProactive(body) },
-                ingestFact: { fact in
-                    // Meeting key facts are model-generated, so they clear the
-                    // same durability gate as extraction (explicit `remember`
-                    // commands don't — a direct user instruction always wins).
-                    guard FactValidator.isDurable(fact) else { return }
-                    await knowledge.remember(fact)
-                })
-            self.meetings = meetings
-
-            screenManager.start(core: core, chat: chat, voice: voice, meetings: meetings)
+            screenManager.start(core: core, chat: chat, voice: voice)
             pushToTalk.start()
             Task {
                 let policy = await ScreenCapturePolicy.load(from: core.settings)
                 agent.screenBuffer.setPolicy(policy)
                 agent.screenBuffer.start() // no-op until Screen Recording is granted
             }
-            mind.start()
-            meetings.start()
+            awareness.start()
             Task {
                 let muted = ((try? await core.settings.get("proactive_muted", as: Bool.self)) ?? nil) ?? false
                 if !muted { notifications.requestAuth() }
@@ -146,18 +135,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
     }
 
+    /// Close the live segment on quit WITHOUT blocking the main thread. The old
+    /// code blocked on a DispatchSemaphore (up to 1s hang, and a slow write was
+    /// silently dropped). Here the runloop keeps turning via `.terminateLater`
+    /// while the close races a 2s cap; either way `recoverOrphanedSegments`
+    /// reconciles it on next launch, so quit can never hang on a stuck write.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let sessions else { return .terminateNow }
+        Task { @MainActor in
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await sessions.closeCurrentSegment() }
+                group.addTask { try? await Task.sleep(for: .seconds(2)) }
+                await group.next()   // whichever finishes first wins
+                group.cancelAll()
+            }
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         screenManager.stop()
-        // Best-effort: mark the live segment closed so history is truthful.
-        // Extraction for it runs on next launch via recoverOrphanedSegments.
-        if let sessions {
-            let semaphore = DispatchSemaphore(value: 0)
-            Task.detached {
-                await sessions.closeCurrentSegment()
-                semaphore.signal()
-            }
-            _ = semaphore.wait(timeout: .now() + 1)
-        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

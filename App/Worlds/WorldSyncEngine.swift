@@ -14,8 +14,8 @@ import JWorlds
 final class WorldSyncEngine {
     private let store: KnowledgeStore
     private weak var knowledge: KnowledgeService?
-    /// Decision engine — new episodes from a sync become triggers there.
-    weak var mind: ConsciousnessService?
+    /// Awareness engine — new episodes from a sync become triggers there.
+    weak var awareness: Awareness?
     private let database: JarvisDatabase
     private let settings: SettingsStore
     private let scratch: URL
@@ -60,16 +60,11 @@ final class WorldSyncEngine {
                 ScreenWorld(database: database)
             },
         ]
-        // Watched folders read their path list from settings; the real
-        // connector is built per-sync in sync() — this is a placeholder.
-        sources["folders"] = Source(kind: "llm_text", name: "Folders", cadence: 600, needsFDA: false) {
-            FolderWorld(paths: [])
-        }
     }
 
     func start() async {
         for (id, source) in sources where id != "screen" {
-            // screen/chat/meetings were registered by the bootstrap
+            // screen/chat were registered by the bootstrap
             await store.ensureWorld(id: id, kind: source.kind, displayName: source.name, enabled: false)
         }
         await restartTimers()
@@ -147,13 +142,7 @@ final class WorldSyncEngine {
 
         let runID = await store.beginIngestRun(worldId: id)
         do {
-            let connector: WorldConnector
-            if id == "folders" {
-                let paths = ((try? await settings.get("watched_folders", as: [String].self)) ?? nil) ?? []
-                connector = FolderWorld(paths: paths)
-            } else {
-                connector = source.make()
-            }
+            let connector = source.make()
             let result = try await connector.sync(cursorJson: world.cursorJson)
 
             var episodesAdded = 0
@@ -176,10 +165,10 @@ final class WorldSyncEngine {
             await store.endIngestRun(id: runID, status: empty ? "empty" : "done",
                                      episodes: episodesAdded, counts: counts)
             if episodesAdded > 0 {
-                // New text episodes → kick the extraction queue + the decision
+                // New text episodes → kick the extraction queue + the awareness
                 // engine (redacted summary only; triage never sees raw bodies).
                 Task { await knowledge?.drainPendingEpisodes() }
-                mind?.post(Trigger(
+                awareness?.post(Trigger(
                     source: id, dedupeKey: "sync:\(id):\(runID)",
                     gateSummary: "\(episodesAdded) new item(s) from \(source.name)"
                         + (titles.isEmpty ? "" : ": " + titles.prefix(3).joined(separator: "; ")),

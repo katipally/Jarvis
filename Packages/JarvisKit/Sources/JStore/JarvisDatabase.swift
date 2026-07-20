@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 
 /// Single entry point to the local store. One instance per app process.
 /// Binary payloads (frames, artifacts) live as files; the DB stores paths.
@@ -26,6 +27,27 @@ public final class JarvisDatabase: Sendable {
 
     public var reader: any DatabaseReader { writer }
 
+    private static let writeLog = Logger(subsystem: "com.jarvis.app", category: "db-write")
+
+    /// A write that LOGS on failure instead of silently swallowing it (the
+    /// pervasive `_ = try? await writer.write { … }` pattern hid dropped writes
+    /// entirely). Use for non-critical persistence: never crash the app over a
+    /// dropped write, but never let one vanish unnoticed. Returns the block's
+    /// value, or nil if the write threw — inspect with `log show --predicate
+    /// 'category == "db-write"'`.
+    @discardableResult
+    public func loggingWrite<T: Sendable>(
+        _ label: String,
+        _ updates: @Sendable @escaping (Database) throws -> T
+    ) async -> T? {
+        do {
+            return try await writer.write(updates)
+        } catch {
+            Self.writeLog.error("write failed [\(label, privacy: .public)]: \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }
+
     static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
 
@@ -50,7 +72,7 @@ public final class JarvisDatabase: Sendable {
 
             try db.create(table: "run") { t in
                 t.primaryKey("id", .text)
-                t.column("kind", .text).notNull() // foreground | background | cron | nudge
+                t.column("kind", .text).notNull() // chat | trigger | heartbeat | cron | nudge ("foreground" in legacy rows)
                 t.column("segment_id", .text)
                 t.column("initiator", .text)
                 t.column("status", .text).notNull()
@@ -493,9 +515,9 @@ public final class JarvisDatabase: Sendable {
             try db.create(index: "ingest_run_on_started", on: "ingest_run", columns: ["started_at"])
         }
 
-        // Decision engine + facet learning (v0.4 M3). Every verdict the engine
-        // reaches — including "stayed quiet" — is a decision row; facets are the
-        // scored, decaying user-preference model.
+        // Decision engine (v0.4 M3). Every verdict the engine reaches —
+        // including "stayed quiet" — is a decision row. (The facet tables
+        // created here were later dropped in v15; see below.)
         migrator.registerMigration("v13_mind") { db in
             try db.create(table: "decision") { t in
                 t.primaryKey("id", .text)
@@ -547,6 +569,19 @@ public final class JarvisDatabase: Sendable {
                 t.uniqueKey(["key", "value", "evidence_ref"])
             }
             try db.create(index: "facet_evidence_on_key", on: "facet_evidence", columns: ["key"])
+        }
+
+        // Meeting transcription was removed; drop its now-unused tables.
+        migrator.registerMigration("v14_drop_meetings") { db in
+            try db.execute(sql: "DROP TABLE IF EXISTS meeting_segment")
+            try db.execute(sql: "DROP TABLE IF EXISTS meeting")
+        }
+
+        // Facet learning was removed; preferences now live as high-salience
+        // facts in the knowledge graph. Drop the parallel facet tables.
+        migrator.registerMigration("v15_drop_facets") { db in
+            try db.execute(sql: "DROP TABLE IF EXISTS facet_evidence")
+            try db.execute(sql: "DROP TABLE IF EXISTS facet")
         }
 
         return migrator

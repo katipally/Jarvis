@@ -6,31 +6,17 @@ import SwiftUI
 struct HomeView: View {
     @Bindable var chat: ChatStore
     var voice: VoiceController?
-    var meetings: MeetingService?
-    /// Reports the height the body wants (current answer + composer) so the
-    /// notch can grow to fit the answer — capped by the view model.
+    /// Reports the height the transcript wants so the notch grows to fit it,
+    /// capped by the view model. Home is a plain chat: the full session history,
+    /// newest at the bottom, auto-growing to fit then scrolling.
     var onBodyHeightChange: (CGFloat) -> Void = { _ in }
-    /// Reports whether the user has scrolled up into history (the panel then
-    /// opens to a comfortable reading height).
-    var onBrowsingChange: (Bool) -> Void = { _ in }
+    /// Starts a fresh conversation (the compose button / ⌘N).
+    var onNewSession: () -> Void = {}
 
     @State private var isDropTargeted = false
-    @FocusState private var inputFocused: Bool
-    @State private var answerHeight: CGFloat = 0
-    @State private var composerHeight: CGFloat = 0
-
-    /// Pinned = glued to the latest answer; browsing = reading history.
-    private enum ScrollMode { case pinned, browsing }
-    @State private var scrollMode: ScrollMode = .pinned
-    /// Geometry changes caused by our own panel resizes are ignored until this
-    /// instant so the resize can't re-trigger itself (the oscillation bug).
-    @State private var suppressGeometryUntil = Date.distantPast
-    @State private var lastDistanceFromBottom: CGFloat = 0
-    @State private var lastReportedBodyHeight: CGFloat = 0
-    @State private var repinTask: Task<Void, Never>?
-    /// Incremented by the "Back to latest" button; observed inside the
-    /// ScrollViewReader where the proxy lives.
-    @State private var returnToLatestRequest = 0
+    @State private var contentHeight: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
+    @State private var accessoriesHeight: CGFloat = 0
 
     /// Comfortable body height for the greeting (no conversation yet).
     private let greetingBaseHeight: CGFloat = 190
@@ -41,65 +27,26 @@ struct HomeView: View {
         chat.messages.filter { !($0.isError && $0.text == chat.errorText) }
     }
 
-    /// Rows after the last user message: the exchange currently "in focus".
-    /// Everything before it lives above the fold (scroll up to see).
-    private var answerStartIndex: Int? {
-        guard !visibleMessages.isEmpty else { return nil }
-        guard let lastUser = visibleMessages.lastIndex(where: { $0.role == .user }) else { return 0 }
-        let start = lastUser + 1
-        return start < visibleMessages.count ? start : nil
-    }
-
-    private var priorMessages: ArraySlice<DisplayMessage> {
-        visibleMessages[..<(answerStartIndex ?? visibleMessages.count)]
-    }
-
-    private var answerMessages: ArraySlice<DisplayMessage> {
-        guard let start = answerStartIndex else { return visibleMessages[visibleMessages.endIndex...] }
-        return visibleMessages[start...]
+    /// The latest user message — the anchor for the current turn. Streaming keeps
+    /// this pinned to the top so the answer grows DOWNWARD (only the bottom edge
+    /// moves) instead of scrolling the whole transcript up.
+    private var lastUserID: String? {
+        visibleMessages.last(where: { $0.role == .user })?.id
     }
 
     private func reportBodyHeight() {
-        // Waiting for the first token of a new answer: hold the current size
-        // instead of collapsing and re-growing.
-        if chat.phase == .responding, answerMessages.isEmpty { return }
-        let content = answerMessages.isEmpty ? greetingBaseHeight : answerHeight
-        // Allowance = bottom padding (10) + a slice of the 14pt gap above the
-        // answer. Must stay ≤ 24 or the previous bubble's bottom edge leaks
-        // into the top of the frame.
-        let spacingAllowance: CGFloat = priorMessages.isEmpty ? 16 : 17
-        let newValue = content + composerHeight + spacingAllowance
-        if abs(newValue - lastReportedBodyHeight) > 8 {
-            // This report will resize the panel — don't let the resulting
-            // geometry churn masquerade as a user scroll.
-            lastReportedBodyHeight = newValue
-            suppressGeometryUntil = max(suppressGeometryUntil, Date.now.addingTimeInterval(0.45))
-        }
-        onBodyHeightChange(newValue)
+        let content = visibleMessages.isEmpty ? greetingBaseHeight : contentHeight
+        onBodyHeightChange(content + accessoriesHeight + 16)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if let meetings, meetings.isActive {
-                MeetingTranscriptCard(appName: meetings.activeAppName, lines: meetings.lines) {
-                    meetings.stopMeeting()
-                }
-                .padding(.bottom, 8)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
             transcript
-            // While browsing history the composer folds into a single compact
-            // button, freeing its space for reading. Clicking it is the ONLY
-            // way back to the focused view — scrolling never snaps back.
-            if scrollMode == .browsing {
-                backToLatestButton
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
-            } else {
-                composer
-                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .bottom)))
-            }
+            // Transient composing accessories (pending attachments + the single
+            // error surface). The composer itself is the floating glass tray
+            // below the notch; these stay in the body so they ride the answer.
+            accessories
         }
-        .animation(.snappy(duration: 0.25), value: scrollMode == .browsing)
         .dropDestination(for: URL.self) { urls, _ in
             for url in urls {
                 if let attachment = AttachmentLoader.load(url: url) {
@@ -117,159 +64,133 @@ struct HomeView: View {
                     .transition(.opacity)
             }
         }
+        // Compose a fresh conversation. Hidden on the empty greeting (already new).
+        .overlay(alignment: .topTrailing) {
+            if !visibleMessages.isEmpty {
+                Button(action: onNewSession) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(Color.jarvisSurface))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .pointerStyle(.link)
+                .keyboardShortcut("n", modifiers: .command)
+                .help("New conversation (⌘N)")
+                .accessibilityLabel("New conversation")
+                .transition(.opacity)
+            }
+        }
         .animation(.snappy, value: isDropTargeted)
+        .animation(.snappy, value: visibleMessages.isEmpty)
     }
 
-    /// Answer-focused transcript: the notch fits the current answer, so only it
-    /// is visible; the user's message, earlier exchanges, and older sessions sit
-    /// above the fold and appear on scroll-up (iMessage style).
+    /// The full conversation, newest at the bottom. The notch auto-grows to fit
+    /// the transcript (capped by the view model); longer histories scroll.
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    if chat.hasOlderHistory {
-                        HStack {
-                            Spacer()
-                            ProgressView().controlSize(.mini)
-                            Spacer()
-                        }
-                        .padding(.vertical, 6)
-                        .onAppear { chat.loadOlderHistory() }
-                    }
                     if visibleMessages.isEmpty {
                         GreetingView()
                             .containerRelativeFrame(.vertical) { height, _ in height * 0.96 }
                             .frame(maxWidth: .infinity)
                     } else {
-                        ForEach(priorMessages) { message in
-                            MessageRow(message: message)
+                        ForEach(visibleMessages) { message in
+                            MessageRow(
+                                message: message,
+                                onRetry: (message.role == .assistant && chat.canRetry
+                                          && message.id == chat.latestAssistant?.id)
+                                    ? { chat.retryLast() } : nil,
+                                onFollowUp: message.isProactive
+                                    ? { chat.askFollowUp("Tell me more about that.", from: message.id) } : nil,
+                                onDismiss: message.isProactive
+                                    ? { chat.dismissProactive(message.id) } : nil
+                            )
+                            .id(message.id)
                         }
-                        // The in-focus exchange: measured as one unit so the panel
-                        // can grow to fit exactly this content.
-                        VStack(alignment: .leading, spacing: 14) {
-                            ForEach(answerMessages) { message in
-                                MessageRow(
-                                    message: message,
-                                    onRetry: (message.role == .assistant && chat.canRetry
-                                              && message.id == chat.latestAssistant?.id)
-                                        ? { chat.retryLast() } : nil
-                                )
-                            }
-                        }
-                        .id("live-bottom")
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                            answerHeight = height
-                            reportBodyHeight()
-                        }
+                        Color.clear.frame(height: 1).id("bottom-anchor")
                     }
                 }
                 .padding(.top, 4)
                 .padding(.bottom, 10)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    contentHeight = height
+                    reportBodyHeight()
+                }
             }
-            // Sending re-pins the view to the incoming answer even if the user
-            // had scrolled up into history (iMessage behavior).
+            // Top-anchored: as the answer grows, the offset from the top holds, so
+            // content stays put and only the bottom extends (the notch grows to
+            // fit) — no whole-transcript scroll-up while streaming.
+            .defaultScrollAnchor(.top)
+            .scrollIndicators(.hidden)
+            .mask {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.black.opacity(0.2), .black], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 10)
+                    Rectangle()
+                    // While streaming, a taller fade at the bottom so each new
+                    // line materializes (fades in) as it appears, then solidifies.
+                    LinearGradient(colors: [.black, .black.opacity(chat.phase == .responding ? 0.0 : 0.2)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: chat.phase == .responding ? 32 : 8)
+                }
+                .animation(.smooth(duration: 0.35), value: chat.phase)
+            }
+            // Frame the current turn ONCE when it starts — pin the question to the
+            // top so the answer grows beneath it. Nothing scrolls mid-stream, so
+            // existing text never shifts (only new lines append below).
             .onChange(of: chat.phase) { _, phase in
                 if phase == .responding {
-                    scrollMode = .pinned
-                    onBrowsingChange(false)
-                    suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
-                    withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
+                    withAnimation(.smooth(duration: 0.35)) { scrollToTurn(proxy) }
                 }
             }
-            // One-way state machine: scrolling up enters browsing; NOTHING the
-            // scroll does ever leaves it (only the button, a send, or a fresh
-            // panel-open do). Resizes therefore can't feed back into mode
-            // changes — the oscillation class of bugs is impossible.
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentSize.height
-                    - (geometry.contentOffset.y + geometry.containerSize.height)
-            } action: { _, distance in
-                lastDistanceFromBottom = distance
-                guard scrollMode == .pinned else { return } // browsing scrolls freely
-                if Date.now >= suppressGeometryUntil, distance > 44 {
-                    // Real upward scroll: enter browsing and open reading room.
-                    scrollMode = .browsing
-                    onBrowsingChange(true)
-                    suppressGeometryUntil = Date.now.addingTimeInterval(0.5)
-                } else if distance > 6 {
-                    // Drift from our own resizes/streaming/restore: quietly
-                    // re-pin once things settle. Scheduled even while geometry
-                    // is suppressed — the task itself waits the suppression out,
-                    // so pinned mode always converges to the bottom.
-                    let wait = max(0.2, suppressGeometryUntil.timeIntervalSinceNow + 0.15)
-                    repinTask?.cancel()
-                    repinTask = Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(wait))
-                        guard !Task.isCancelled, scrollMode == .pinned,
-                              lastDistanceFromBottom > 6 else { return }
-                        var transaction = Transaction()
-                        transaction.disablesAnimations = true
-                        withTransaction(transaction) { proxy.scrollTo("live-bottom", anchor: .bottom) }
-                    }
+            // A message arriving while idle (e.g. a proactive nudge) reveals itself.
+            .onChange(of: chat.messages.count) { _, _ in
+                guard chat.phase != .responding else { return }
+                withAnimation(.smooth(duration: 0.35)) { scrollToTurn(proxy) }
+            }
+            // Track the visible height so we know when the answer overflows.
+            .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, h in
+                viewportHeight = h
+            }
+            // Once the answer overflows the panel (max height reached), follow the
+            // bottom so the newest tokens stay visible; below that it's stationary.
+            .onChange(of: contentHeight) { _, _ in
+                guard chat.phase == .responding, contentHeight > viewportHeight + 4 else { return }
+                proxy.scrollTo("bottom-anchor", anchor: .bottom)
+            }
+            .onAppear {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(50))
+                    scrollToTurn(proxy)
                 }
-            }
-            // The button's return path needs the proxy: run it via state change.
-            .onChange(of: returnToLatestRequest) { _, _ in
-                guard scrollMode == .browsing else { return }
-                scrollMode = .pinned
-                onBrowsingChange(false)
-                suppressGeometryUntil = Date.now.addingTimeInterval(0.6)
-                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("live-bottom", anchor: .bottom) }
-            }
-        }
-        .defaultScrollAnchor(.bottom)
-        .scrollIndicators(.hidden)
-        .mask {
-            // Content dissolves at the edges instead of clipping hard. Kept
-            // shallow so a tightly-fitted one-line answer isn't dimmed.
-            VStack(spacing: 0) {
-                LinearGradient(colors: [.black.opacity(0.2), .black], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 10)
-                Rectangle()
-                LinearGradient(colors: [.black, .black.opacity(0.2)], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 8)
             }
         }
     }
 
-    /// Replaces the composer while browsing history: one compact affordance
-    /// that returns to the fitted, answer-focused view.
-    private var backToLatestButton: some View {
-        Button {
-            returnToLatestRequest += 1
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                Text("Back to latest")
-                    .font(.jarvisCaption.weight(.medium))
-            }
-            .foregroundStyle(.white.opacity(0.85))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(Color.jarvisSurfaceHover)
-                    .strokeBorder(Color.jarvisStroke, lineWidth: 1)
-            )
-            .contentShape(Capsule())
+    private func scrollToTurn(_ proxy: ScrollViewProxy) {
+        if let id = lastUserID {
+            proxy.scrollTo(id, anchor: .top)
+        } else {
+            proxy.scrollTo("bottom-anchor", anchor: .bottom)
         }
-        .buttonStyle(.plain)
-        .pointerStyle(.link)
-        .keyboardShortcut(.cancelAction)
-        .accessibilityLabel("Back to the latest message")
-        .frame(maxWidth: .infinity)
-        .padding(.top, 4)
-        .padding(.bottom, 2)
     }
 
-    private var composer: some View {
+    /// Transient composing accessories shown at the bottom of the body: pending
+    /// attachments + the single error surface. The composer itself is the
+    /// floating glass tray below the notch; these ride the answer so drag-drop
+    /// and errors stay visually attached to the conversation.
+    @ViewBuilder
+    private var accessories: some View {
+        let hasContent = chat.errorText != nil || !chat.attachments.isEmpty
         VStack(spacing: 8) {
             if let error = chat.errorText {
                 errorBanner(error)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-
             if !chat.attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -280,78 +201,12 @@ struct HomeView: View {
                     }
                 }
             }
-
-            HStack(spacing: 10) {
-                TextField(
-                    "",
-                    text: $chat.input,
-                    prompt: Text("Ask anything…").foregroundStyle(.white.opacity(0.45)),
-                    axis: .vertical
-                )
-                .textFieldStyle(.plain)
-                .font(.jarvisBody)
-                .foregroundStyle(.white)
-                .lineLimit(1...3) // grows to 3 lines, then the text scrolls inside
-                .focused($inputFocused)
-                .onChange(of: chat.input) { chat.draftChanged() }
-                .onSubmit(send)
-                .onKeyPress(.return) {
-                    if NSEvent.modifierFlags.contains(.shift) { return .ignored }
-                    send()
-                    return .handled
-                }
-
-                if let voice {
-                    // Stays in layout while responding (disabled + dimmed), so
-                    // the composer geometry never jumps.
-                    Button { voice.toggle() } label: {
-                        Image(systemName: voice.phase == .listening ? "stop.circle.fill" : "mic.fill")
-                            .symbolRenderingMode(.hierarchical)
-                            .contentTransition(.symbolEffect(.replace))
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(voice.phase == .listening ? Color.jarvisError : .white.opacity(0.7))
-                            .frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(chat.phase == .responding)
-                    .opacity(chat.phase == .responding ? 0.3 : 1)
-                    .animation(.snappy, value: voice.phase == .listening)
-                    .help("Hold Option to talk, or click to dictate")
-                    .accessibilityLabel(voice.phase == .listening ? "Stop dictation" : "Start dictation")
-                }
-
-                Button(action: primaryAction) {
-                    Image(systemName: chat.phase == .responding ? "stop.fill" : "arrow.up")
-                        .contentTransition(.symbolEffect(.replace))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .frame(width: 26, height: 26)
-                        .background(Circle().fill(chat.phase == .responding ? Color.white.opacity(0.85) : (chat.canSend ? .white : .white.opacity(0.25))))
-                }
-                .buttonStyle(.plain)
-                .disabled(chat.phase != .responding && !chat.canSend)
-                .accessibilityLabel(chat.phase == .responding ? "Stop response" : "Send message")
-            }
-            .padding(.leading, 16)
-            .padding(.trailing, 8)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(.white.opacity(0.10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(.white.opacity(inputFocused ? 0.28 : 0.16), lineWidth: 1)
-                    )
-            )
-            .animation(.easeOut(duration: 0.15), value: inputFocused)
         }
-        .padding(.top, 4)
+        .padding(.top, hasContent ? 8 : 0)
         .animation(.snappy, value: chat.errorText)
         .animation(.snappy, value: chat.attachments)
-        .animation(.snappy, value: chat.phase)
-        .onAppear { inputFocused = true }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-            composerHeight = height
+            accessoriesHeight = height
             reportBodyHeight()
         }
     }
@@ -382,19 +237,6 @@ struct HomeView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.jarvisError.opacity(0.12)))
-    }
-
-    private func primaryAction() {
-        if chat.phase == .responding {
-            chat.interrupt()
-        } else {
-            send()
-        }
-    }
-
-    private func send() {
-        chat.send()
-        inputFocused = true
     }
 }
 
@@ -438,6 +280,9 @@ struct MessageRow: View {
     let message: DisplayMessage
     /// "Try again" — re-sends the exchange; only set on Home's last assistant row.
     var onRetry: (() -> Void)? = nil
+    /// Inline actions for a proactive nudge (Tell me more / Dismiss).
+    var onFollowUp: (() -> Void)? = nil
+    var onDismiss: (() -> Void)? = nil
 
     /// Reasoning timing, measured live from this row's stream (nil for restored
     /// history, where the elapsed time can't be reconstructed).
@@ -491,6 +336,18 @@ struct MessageRow: View {
                         .symbolRenderingMode(.hierarchical)
                         .font(.system(size: 12))
                         .foregroundStyle(Color.jarvisError)
+                } else if message.isStreaming {
+                    // Lightweight plain text while streaming (no per-token Markdown
+                    // re-parse/reflow); swaps to full Markdown once the answer
+                    // settles below.
+                    if message.text.isEmpty {
+                        ThinkingDots()
+                    } else {
+                        Text(message.text)
+                            .font(.jarvisBody)
+                            .foregroundStyle(Color.jarvisTextPrimary)
+                            .textSelection(.enabled)
+                    }
                 } else if !message.text.isEmpty {
                     Markdown(message.text)
                         .markdownTheme(.jarvis)
@@ -501,8 +358,26 @@ struct MessageRow: View {
                                 Button("Try again", action: onRetry)
                             }
                         }
-                } else if message.isStreaming {
-                    ThinkingDots()
+                }
+                if message.isStopped {
+                    Label("Stopped", systemImage: "stop.circle")
+                        .font(.jarvisFootnote)
+                        .foregroundStyle(.white.opacity(0.4))
+                        .padding(.top, 2)
+                }
+                if message.isProactive, onFollowUp != nil {
+                    HStack(spacing: 12) {
+                        Button { onFollowUp?() } label: {
+                            Label("Tell me more", systemImage: "arrow.turn.down.right").font(.jarvisCaption)
+                        }
+                        .buttonStyle(.plain).foregroundStyle(Color.jarvisAccent).pointerStyle(.link)
+                        Button { onDismiss?() } label: {
+                            Text("Dismiss").font(.jarvisCaption)
+                        }
+                        .buttonStyle(.plain).foregroundStyle(Color.jarvisTextTertiary).pointerStyle(.link)
+                    }
+                    .padding(.top, 2)
+                    .transition(.opacity)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

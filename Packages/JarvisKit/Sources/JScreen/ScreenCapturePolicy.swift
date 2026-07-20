@@ -7,7 +7,9 @@ import JStore
 public struct ScreenCapturePolicy: Codable, Sendable, Equatable {
     /// Master switch — when false, no frames are captured at all.
     public var enabled: Bool
-    /// Retention window in hours. The UI offers 24 / 72 / 168 (1d / 3d / 1wk).
+    /// Retention window in hours for RAW frames — a short "what's on my screen
+    /// lately" tool, not a long-term store (habits live in the graph as text
+    /// activity records instead). The UI offers 2 / 5 / 12 hours.
     public var retentionHours: Int
     /// Bundle IDs to never capture, layered on top of the built-in
     /// password-manager blocklist.
@@ -17,9 +19,9 @@ public struct ScreenCapturePolicy: Codable, Sendable, Equatable {
 
     public init(
         enabled: Bool = true,
-        retentionHours: Int = 72,
+        retentionHours: Int = 5,
         excludedBundleIDs: [String] = [],
-        ceilingBytes: Int = 1_000_000_000
+        ceilingBytes: Int = 300_000_000
     ) {
         self.enabled = enabled
         self.retentionHours = retentionHours

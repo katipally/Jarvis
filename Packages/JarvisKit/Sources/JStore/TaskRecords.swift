@@ -30,14 +30,14 @@ public struct CommitmentRow: Codable, Sendable, Identifiable, FetchableRecord, P
     }
 }
 
-/// An action item extracted from chat or a meeting. Lands as `suggested` for
-/// user review (omi staged-tasks pattern), promoted to `open`, then `done`.
+/// An action item extracted from chat. Lands as `suggested` for user review
+/// (omi staged-tasks pattern), promoted to `open`, then `done`.
 public struct TaskRow: Codable, Sendable, Identifiable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "task"
     public static let databaseColumnEncodingStrategy = DatabaseColumnEncodingStrategy.convertToSnakeCase
     public static let databaseColumnDecodingStrategy = DatabaseColumnDecodingStrategy.convertFromSnakeCase
 
-    public enum Source: String, Codable, Sendable { case chat, meeting, manual }
+    public enum Source: String, Codable, Sendable { case chat, manual }
     public enum Status: String, Codable, Sendable { case suggested, open, done, dismissed }
 
     public var id: String

@@ -52,7 +52,7 @@ public struct IMessageWorld: WorldConnector {
         let (messages, scannedMax) = try await Self.fetch(queue, after: old.lastRowid)
 
         var result = WorldSyncResult()
-        var newest = max(old.lastRowid, scannedMax)
+        let newest = max(old.lastRowid, scannedMax)
         var byChat: [String: [RawMessage]] = [:]
         for message in messages {
             byChat[message.chat, default: []].append(message)

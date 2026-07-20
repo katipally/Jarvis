@@ -19,6 +19,11 @@ final class JarvisCore {
     /// Minutes of inactivity after which the next message starts a new session.
     private(set) var sessionGapMinutes = 5
 
+    /// Private mode: the agent is restricted to READ-ONLY tools — it can look
+    /// (memory, screen, calendar reads, web) but never act on the world (no
+    /// mail_send, file writes, app control). A hard, user-visible safety switch.
+    private(set) var privateMode = false
+
     /// Fired whenever the session gap changes (and once on load) so the
     /// SessionManager can pick it up.
     var onSessionGapChange: ((Int) -> Void)?
@@ -26,6 +31,7 @@ final class JarvisCore {
     private static let assignmentsKey = "role_assignments"
     private static let onboardingKey = "onboarding_complete"
     private static let sessionGapKey = "session_gap_minutes"
+    private static let privateModeKey = "private_mode"
 
     init(database: JarvisDatabase, cacheDirectory: URL) {
         self.database = database
@@ -47,6 +53,7 @@ final class JarvisCore {
         }
         onboardingComplete = (try? await settings.get(Self.onboardingKey, as: Bool.self)) ?? false
         sessionGapMinutes = (try? await settings.get(Self.sessionGapKey, as: Int.self)) ?? 5
+        privateMode = ((try? await settings.get(Self.privateModeKey, as: Bool.self)) ?? nil) ?? false
         onSessionGapChange?(sessionGapMinutes)
         loaded = true
         await catalog.refresh()
@@ -56,6 +63,11 @@ final class JarvisCore {
         sessionGapMinutes = max(1, minutes)
         onSessionGapChange?(sessionGapMinutes)
         try? await settings.set(Self.sessionGapKey, to: sessionGapMinutes)
+    }
+
+    func setPrivateMode(_ on: Bool) async {
+        privateMode = on
+        try? await settings.set(Self.privateModeKey, to: on)
     }
 
     var isConfigured: Bool { assignments[.brain] != nil }

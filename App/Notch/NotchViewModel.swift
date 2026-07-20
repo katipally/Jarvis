@@ -1,6 +1,21 @@
 import AppKit
 import Observation
 
+/// The single, authoritative description of what the notch is showing right now.
+/// Both the panel size and the rendered content derive from this one value, so
+/// they can never disagree (the old code reconstructed state from ~7 booleans in
+/// two parallel `if`-chains that could drift apart). `NotchViewModel.state`
+/// (closed/open) remains the authoritative toggle; this is *derived* from it plus
+/// the live service state, via a priority ladder in `NotchView`.
+enum NotchPresentation: Equatable {
+    case idle                              // closed, nothing active
+    case onboarding                        // first run (primary display)
+    case open(NotchViewModel.Tab)          // expanded panel
+    case listening(VoiceController.Phase)  // voice chrome (listening/processing/review)
+    case peek(String)                      // proactive nudge, first line
+    case working                           // background-run pulse bar
+}
+
 @MainActor
 @Observable
 final class NotchViewModel {
@@ -10,7 +25,7 @@ final class NotchViewModel {
     }
 
     enum Tab: String, CaseIterable, Identifiable, Equatable {
-        case home, history, activity, settings
+        case home, history, profile, settings
 
         var id: String { rawValue }
 
@@ -18,16 +33,16 @@ final class NotchViewModel {
             switch self {
             case .home: "message"
             case .history: "clock.arrow.circlepath"
-            case .activity: "waveform.path.ecg"
+            case .profile: "person.text.rectangle"
             case .settings: "gearshape"
             }
         }
 
         var label: String {
             switch self {
-            case .home: "Home"
+            case .home: "Chat"
             case .history: "History"
-            case .activity: "Activity"
+            case .profile: "Profile"
             case .settings: "Settings"
             }
         }
@@ -45,14 +60,23 @@ final class NotchViewModel {
     @ObservationIgnored private weak var window: NSWindow?
     @ObservationIgnored private var openedAt: Date?
     @ObservationIgnored private var hoverOpenTask: Task<Void, Never>?
+    /// Fired after every open/close so the screen manager can install the pointer
+    /// monitors only while a panel is open (→ zero mouse tracking while idle).
+    @ObservationIgnored var onStateChange: (() -> Void)?
 
-    static let shadowPadding: CGFloat = 22
+    private static let homeBodyHeightKey = "jarvis.homeBodyHeight"
 
     init(screen: NSScreen) {
         displayID = screen.jarvisDisplayID
         screenFrame = screen.frame
         hasPhysicalNotch = screen.safeAreaInsets.top > 0
         closedNotchSize = Self.computeClosedNotchSize(for: screen)
+        // Seed the last-known Home height so the first open after launch morphs
+        // straight to the right size instead of jumping min → measured. The
+        // HomeView measure loop corrects it on mount if the answer differs.
+        if let saved = UserDefaults.standard.object(forKey: Self.homeBodyHeightKey) as? Double {
+            homeBodyHeight = CGFloat(saved)
+        }
     }
 
     // MARK: - Per-tab sizing
@@ -65,17 +89,11 @@ final class NotchViewModel {
     /// Home chrome above/below the body (header row + content paddings).
     private var homeChromeHeight: CGFloat { closedNotchSize.height + 8 + 16 }
 
-    /// Low floor: a one-line answer should give a compact panel, not a tall
-    /// empty one; the greeting reports its own comfortable height instead.
-    var homeMinHeight: CGFloat { clamp(screenFrame.height * 0.12, 120, 150) }
+    /// Low floor: focus pins ONLY the latest answer (top-aligned) and the notch
+    /// fits it tightly, so a one-line answer gives a compact panel rather than a
+    /// tall empty one. The greeting reports its own comfortable height instead.
+    var homeMinHeight: CGFloat { clamp(screenFrame.height * 0.09, 96, 124) }
     var homeMaxHeight: CGFloat { screenFrame.height * 0.5 }
-    /// While the user reads history the panel opens up to at least 30% of the
-    /// screen — short answers shouldn't force reading through a slot.
-    var homeBrowsingHeight: CGFloat { screenFrame.height * 0.30 }
-
-    /// True while the user has scrolled up into history (not pinned to the
-    /// latest answer). Set by the chat view.
-    var homeBrowsingHistory = false
 
     /// Each tab expands the notch to its own proportion of the screen.
     func openContentSize(for tab: Tab) -> CGSize {
@@ -83,22 +101,32 @@ final class NotchViewModel {
         let h = screenFrame.height
         switch tab {
         case .home:
-            var height = homeBodyHeight.map { clamp($0 + homeChromeHeight, homeMinHeight, homeMaxHeight) }
+            let height = homeBodyHeight.map { clamp($0 + homeChromeHeight, homeMinHeight, homeMaxHeight) }
                 ?? homeMinHeight
-            if homeBrowsingHistory {
-                height = max(height, min(homeBrowsingHeight, homeMaxHeight))
-            }
             return CGSize(width: clamp(w * 0.32, 440, 540), height: height)
         case .history:
             return CGSize(width: clamp(w * 0.40, 520, 680), height: clamp(h * 0.34, 240, 400))
         case .settings:
             return CGSize(width: clamp(w * 0.40, 540, 700), height: clamp(h * 0.42, 320, 480))
-        case .activity:
+        case .profile:
             return CGSize(width: clamp(w * 0.56, 620, 960), height: clamp(h * 0.46, 340, 580))
         }
     }
 
     var currentOpenContentSize: CGSize { openContentSize(for: selectedTab) }
+
+    /// The panel size for a presentation — the single sizing authority. Content
+    /// (in NotchView) switches on the same value, so size and content stay locked.
+    func size(for presentation: NotchPresentation) -> CGSize {
+        switch presentation {
+        case .onboarding: onboardingSize
+        case .open(let tab): openContentSize(for: tab)
+        case .listening(let phase): phase == .review ? listeningReviewSize : listeningSize
+        case .peek: listeningSize
+        case .working: workingSize     // two lines: holds the verbose status text
+        case .idle: closedNotchSize
+        }
+    }
 
     /// First-run onboarding size (primary display only).
     var onboardingSize: CGSize {
@@ -108,19 +136,22 @@ final class NotchViewModel {
     /// Compact size shown while listening: waveform flanks the camera on the top
     /// row, the transcript sits on one line BELOW the camera cutout.
     var listeningSize: CGSize {
-        CGSize(width: clamp(closedNotchSize.width + 200, 340, 400), height: closedNotchSize.height + 26)
+        CGSize(width: clamp(closedNotchSize.width + NotchMetrics.listeningExtraWidth, 280, 360),
+               height: closedNotchSize.height + NotchMetrics.listeningExtraHeight)
     }
 
     /// Listening size grown for the dictation-review state: the full transcript
     /// plus the send/cancel pair.
     var listeningReviewSize: CGSize {
-        CGSize(width: listeningSize.width, height: closedNotchSize.height + 96)
+        CGSize(width: listeningSize.width, height: closedNotchSize.height + NotchMetrics.reviewExtraHeight)
     }
 
-    /// Slim closed-notch status bar (meeting timer, background-run pulse):
-    /// camera-row height only, widened so the flanks can hold an icon + timer.
-    var closedStatusSize: CGSize {
-        CGSize(width: clamp(closedNotchSize.width + 150, 300, 360), height: closedNotchSize.height)
+    /// The compact glowing "working" bar: slightly wider than closed and two
+    /// lines tall (verbose status below the camera). Shown while the agent is
+    /// working, then it expands to the answer.
+    var workingSize: CGSize {
+        CGSize(width: clamp(closedNotchSize.width + NotchMetrics.workingExtraWidth, 320, 400),
+               height: closedNotchSize.height + NotchMetrics.workingExtraHeight)
     }
 
     /// The window is fixed at the largest a tab can ever need; only the inner
@@ -135,8 +166,10 @@ final class NotchViewModel {
 
     var windowSize: CGSize {
         CGSize(
-            width: maxOpenContentSize.width + Self.shadowPadding * 2,
-            height: maxOpenContentSize.height + Self.shadowPadding
+            width: maxOpenContentSize.width + NotchMetrics.shadowPadding * 2,
+            // Reserve room BELOW the body for the floating glass tray so a
+            // max-height answer plus the tray still fits in the fixed window.
+            height: maxOpenContentSize.height + NotchMetrics.trayReserve + NotchMetrics.shadowPadding
         )
     }
 
@@ -149,6 +182,21 @@ final class NotchViewModel {
             y: screenFrame.maxY - size.height,
             width: size.width,
             height: size.height
+        )
+    }
+
+    /// The floating glass tray's region in screen coordinates: directly below
+    /// the body, separated by `trayGap`. Union'd with `visibleRect` for the
+    /// auto-close hit region so moving onto the composer/Stop never reads as
+    /// "left the panel".
+    func trayRect(open: Bool) -> CGRect {
+        let body = visibleRect(open: open)
+        let height = NotchMetrics.trayHeight
+        return CGRect(
+            x: body.midX - body.width / 2,
+            y: body.minY - NotchMetrics.trayGap - height,
+            width: body.width,
+            height: height
         )
     }
 
@@ -184,6 +232,7 @@ final class NotchViewModel {
         guard state != .open else { return }
         state = .open
         openedAt = .now
+        onStateChange?()
     }
 
     func close() {
@@ -191,6 +240,11 @@ final class NotchViewModel {
         guard state != .closed else { return }
         state = .closed
         openedAt = nil
+        // Persist the settled Home height to seed the next launch's first open.
+        if let homeBodyHeight {
+            UserDefaults.standard.set(Double(homeBodyHeight), forKey: Self.homeBodyHeightKey)
+        }
+        onStateChange?()
     }
 
     /// True while something must stay on screen regardless of the pointer
@@ -231,8 +285,8 @@ final class NotchViewModel {
     }
 
     private static func computeClosedNotchSize(for screen: NSScreen) -> CGSize {
-        var notchWidth: CGFloat = 185
-        var notchHeight: CGFloat = 32
+        var notchWidth = NotchMetrics.fallbackClosedSize.width
+        var notchHeight = NotchMetrics.fallbackClosedSize.height
 
         if let left = screen.auxiliaryTopLeftArea?.width,
            let right = screen.auxiliaryTopRightArea?.width {

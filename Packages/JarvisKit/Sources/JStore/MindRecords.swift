@@ -1,8 +1,8 @@
 import Foundation
 import GRDB
 
-// GRDB rows for the v13 decision engine: decision / delivery_state / facet /
-// facet_evidence. See JarvisDatabase v13_mind.
+// GRDB rows for the decision engine: decision / delivery_state.
+// See JarvisDatabase v13_mind.
 
 public struct DecisionRow: Codable, Sendable, Identifiable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "decision"
@@ -49,71 +49,5 @@ public struct DeliveryStateRow: Codable, Sendable, FetchableRecord, PersistableR
         self.category = category
         self.stage = stage
         self.sentAt = sentAt
-    }
-}
-
-public struct FacetRow: Codable, Sendable, Identifiable, FetchableRecord, PersistableRecord {
-    public static let databaseTableName = "facet"
-    public static let databaseColumnEncodingStrategy = DatabaseColumnEncodingStrategy.convertToSnakeCase
-    public static let databaseColumnDecodingStrategy = DatabaseColumnDecodingStrategy.convertFromSnakeCase
-
-    public var id: String { key }
-    public var key: String
-    public var `class`: String
-    public var value: String
-    public var state: String // active | provisional | candidate
-    public var stability: Double
-    public var evidenceCount: Int
-    public var firstSeenAt: Date
-    public var lastSeenAt: Date
-    public var userState: String // auto | pinned | forgotten
-
-    enum CodingKeys: String, CodingKey {
-        case key, `class` = "class", value, state, stability, evidenceCount, firstSeenAt, lastSeenAt, userState
-    }
-
-    public init(key: String, class klass: String, value: String, state: String,
-                stability: Double, evidenceCount: Int, firstSeenAt: Date, lastSeenAt: Date,
-                userState: String = "auto") {
-        self.key = key
-        self.class = klass
-        self.value = value
-        self.state = state
-        self.stability = stability
-        self.evidenceCount = evidenceCount
-        self.firstSeenAt = firstSeenAt
-        self.lastSeenAt = lastSeenAt
-        self.userState = userState
-    }
-}
-
-public struct FacetEvidenceRow: Codable, Sendable, Identifiable, FetchableRecord, PersistableRecord {
-    public static let databaseTableName = "facet_evidence"
-    public static let databaseColumnEncodingStrategy = DatabaseColumnEncodingStrategy.convertToSnakeCase
-    public static let databaseColumnDecodingStrategy = DatabaseColumnDecodingStrategy.convertFromSnakeCase
-
-    public var id: String
-    public var `class`: String
-    public var key: String
-    public var value: String
-    public var cue: String // explicit | structural | behavioral | recurrence
-    public var evidenceRef: String
-    public var observedAt: Date
-    public var consumedAt: Date?
-
-    enum CodingKeys: String, CodingKey {
-        case id, `class` = "class", key, value, cue, evidenceRef, observedAt, consumedAt
-    }
-
-    public init(id: String = UUID().uuidString, class klass: String, key: String, value: String,
-                cue: String, evidenceRef: String, observedAt: Date = .now, consumedAt: Date? = nil) {
-        self.id = id
-        self.class = klass
-        self.key = key
-        self.value = value
-        self.cue = cue
-        self.evidenceRef = evidenceRef
-        self.observedAt = observedAt
-        self.consumedAt = consumedAt
     }
 }

@@ -8,6 +8,44 @@ enum NotchAnimation {
     static let tab = Animation.spring(response: 0.36, dampingFraction: 0.82)
 }
 
+/// Single source of truth for the notch's fixed geometry constants. Every
+/// camera-reserve gap, size delta, and corner radius routes through here so the
+/// closed "bars" and the open header stay pixel-aligned — a hard requirement for
+/// the matched-geometry morph, where a mismatched reserve makes content jump.
+enum NotchMetrics {
+    /// Notch size on displays without a physical notch.
+    static let fallbackClosedSize = CGSize(width: 185, height: 32)
+    /// Gap flanking the camera housing in the compact bars (listening/peek/working).
+    static let cameraSideReserve: CGFloat = 22
+    /// Central void reserved for the camera in the open tab header.
+    static let headerCameraReserve: CGFloat = 28
+    /// Width/height added to the closed notch for the listening chrome. Just
+    /// enough for a small waveform hugging the left of the camera and a mic
+    /// hugging the right, plus a one-line transcript below.
+    static let listeningExtraWidth: CGFloat = 100
+    static let listeningExtraHeight: CGFloat = 26
+    /// The compact "working" bar: a touch wider than closed and tall enough for
+    /// one line of status on the second row, below the camera.
+    static let workingExtraWidth: CGFloat = 160
+    static let workingExtraHeight: CGFloat = 26
+    /// Extra height for the dictation-review state (transcript + send/cancel).
+    static let reviewExtraHeight: CGFloat = 96
+    /// Slack around the content so the fixed window can hold the glow bleed + shadow.
+    static let shadowPadding: CGFloat = 22
+    /// The floating glass tray (composer / Back-to-latest / Stop / Continue)
+    /// lives BELOW the black body: this is the gap between the notch's bottom
+    /// edge and the tray, and the tray's own height. The window reserves both so
+    /// a max-height answer plus the tray still fits inside the fixed panel.
+    static let trayGap: CGFloat = 10
+    /// Hit-region + reserve height for the tray. Tall enough to hold the
+    /// composer grown to its 3-line maximum (it grows downward from the body).
+    static let trayHeight: CGFloat = 84
+    static let trayReserve: CGFloat = 10 + 84 + 16 // gap + height + breathing room
+    /// Corner radii: (top, bottom) for the closed notch and the open panel.
+    static let cornerClosed: (top: CGFloat, bottom: CGFloat) = (6, 14)
+    static let cornerOpen: (top: CGFloat, bottom: CGFloat) = (20, 26)
+}
+
 /// Semantic palette — every status/accent color in the notch UI routes through
 /// these so identical meanings always use identical colors.
 extension Color {

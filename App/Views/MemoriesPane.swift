@@ -130,6 +130,9 @@ struct MemoriesPane: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 salienceBadge(item.salience)
+                if let source = item.source {
+                    sourceBadge(source)
+                }
                 Spacer()
                 Text(item.createdAt.formatted(.relative(presentation: .named)))
                     .font(.jarvisFootnote).monospacedDigit()
@@ -161,6 +164,32 @@ struct MemoriesPane: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: JarvisRadius.card, style: .continuous).fill(Color.jarvisSurface))
+    }
+
+    /// Provenance: where Jarvis learned this — so the user can see WHY it's known.
+    private func sourceBadge(_ source: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: sourceSymbol(source)).font(.system(size: 8))
+            Text(source).font(.system(size: 9, weight: .medium)).lineLimit(1)
+        }
+        .fixedSize()
+        .foregroundStyle(Color.jarvisTextTertiary)
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(Capsule().fill(Color.jarvisSurface))
+        .accessibilityLabel("Learned from \(source)")
+    }
+
+    private func sourceSymbol(_ source: String) -> String {
+        let s = source.lowercased()
+        if s.contains("mail") { return "envelope" }
+        if s.contains("calendar") { return "calendar" }
+        if s.contains("message") { return "message" }
+        if s.contains("note") { return "note.text" }
+        if s.contains("contact") { return "person.crop.circle" }
+        if s.contains("brows") { return "safari" }
+        if s.contains("screen") { return "eye" }
+        if s.contains("chat") || s.contains("convers") { return "bubble.left" }
+        return "sparkles"
     }
 
     private func salienceBadge(_ salience: Double) -> some View {

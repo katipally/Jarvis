@@ -29,7 +29,7 @@ let package = Package(
         .target(name: "JAgent"),
         .target(name: "JSpeech"),
         // Knowledge core (v0.4): episode → fact → typed entities + bi-temporal
-        // edges, hybrid retrieval. Replaces the old JMemory.
+        // edges, hybrid retrieval.
         .target(
             name: "JKnowledge",
             dependencies: ["JStore", .product(name: "GRDB", package: "GRDB.swift")]

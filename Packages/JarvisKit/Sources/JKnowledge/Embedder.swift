@@ -22,6 +22,11 @@ public struct Embedder: @unchecked Sendable {
     public var isAvailable: Bool { model != nil }
     public var dimension: Int { model?.dimension ?? 0 }
 
+    /// True only when embeddings can ACTUALLY run — the model exists AND its
+    /// over-the-air assets are on device. When false, `embed()` returns nil and
+    /// retrieval silently degrades to FTS-only; the UI uses this to say so.
+    public var semanticAvailable: Bool { model?.hasAssets ?? false }
+
     /// Embed text to a unit-normalized Float vector, or nil if the model / its
     /// assets are unavailable or the text produced no tokens.
     public func embed(_ text: String) -> [Float]? {
@@ -75,6 +80,8 @@ private final class Model: @unchecked Sendable {
     private var loaded: Bool?
 
     let dimension: Int
+
+    var hasAssets: Bool { embedding.hasAvailableAssets }
 
     init(embedding: NLContextualEmbedding, language: NLLanguage) {
         self.embedding = embedding

@@ -24,7 +24,7 @@ struct TasksPane: View {
                     JarvisEmptyState(
                         symbol: "checklist",
                         title: "No tasks yet",
-                        message: "Jarvis suggests tasks from your chats and meetings — or add one above."
+                        message: "Jarvis suggests tasks from your chats — or add one above."
                     )
                 } else {
                     ScrollView {

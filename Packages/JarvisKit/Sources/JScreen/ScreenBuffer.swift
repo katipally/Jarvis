@@ -7,7 +7,7 @@ import JStore
 /// a periodic tick, dedups near-identical frames, and sweeps on a 72h TTL / 1GB
 /// ceiling. Frames reach a model only via agent tools — with one documented
 /// exception: the proactivity context-switch evaluation sends the single switch
-/// frame to the user-configured aux model (see ProactivityService).
+/// frame to the user-configured aux model (see Awareness).
 public final class ScreenBuffer: @unchecked Sendable {
     private let database: JarvisDatabase
     private let framesDir: URL
@@ -73,7 +73,7 @@ public final class ScreenBuffer: @unchecked Sendable {
             // are marked skipped so search_screen doesn't wait on them forever.
             Task { [weak self] in
                 guard let self else { return }
-                let rows = (try? await self.database.reader.read { db in
+                let rows = (try? self.database.reader.read { db in
                     try Row.fetchAll(db, sql: "SELECT id, jpeg_path FROM screen_frame WHERE ocr_status = 'pending'")
                 }) ?? []
                 for row in rows {

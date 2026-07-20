@@ -242,20 +242,6 @@ actor SessionManager {
         }) ?? []
     }
 
-    /// Older persisted conversation across ALL segments, newest-last — the
-    /// scroll-up lazy-load source for the Home transcript (iMessage style).
-    func messagesBefore(_ cutoff: Date, limit: Int = 30) async -> [StoredMessage] {
-        (try? await database.reader.read { db -> [StoredMessage] in
-            let records = try MessageRecord
-                .filter(Column("created_at") < cutoff)
-                .filter(Column("active") == true)
-                .order(Column("created_at").desc)
-                .limit(limit)
-                .fetchAll(db)
-            return records.reversed().map(Self.stored)
-        }) ?? []
-    }
-
     private static func stored(_ r: MessageRecord) -> StoredMessage {
         StoredMessage(
             id: r.id,

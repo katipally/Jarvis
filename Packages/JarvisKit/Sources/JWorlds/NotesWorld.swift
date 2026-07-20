@@ -36,7 +36,7 @@ public struct NotesWorld: WorldConnector {
             WHERE ZTITLE1 IS NOT NULL AND ZMODIFICATIONDATE1 > ?
             ORDER BY ZMODIFICATIONDATE1 LIMIT 200
             """
-        let rows = try await queue.read { db in
+        let rows = try queue.read { db in
             try Row.fetchAll(db, sql: sql, arguments: [old.lastModified])
         }
 

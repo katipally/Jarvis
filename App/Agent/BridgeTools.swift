@@ -184,8 +184,18 @@ enum BridgeTools {
         }
     }
 
+    /// Escape arbitrary text for embedding inside an AppleScript double-quoted
+    /// literal. Backslash/quote are escaped; line breaks and tabs — which a raw
+    /// quoted literal can't hold — are spliced out as AppleScript constant
+    /// concatenations (`" & return & "`), so a body with newlines can't break
+    /// the script. Order matters: CRLF before lone CR/LF.
     private static func escape(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\r\n", with: "\" & return & \"")
+            .replacingOccurrences(of: "\r", with: "\" & return & \"")
+            .replacingOccurrences(of: "\n", with: "\" & return & \"")
+            .replacingOccurrences(of: "\t", with: "\" & tab & \"")
     }
 
     private static func parseDate(_ s: String) -> Date? {

@@ -4,14 +4,13 @@ import JKnowledge
 import JStore
 
 /// One-time fresh-start bootstrap after the v12 migration: registers the
-/// built-in worlds and re-materializes stored history (conversations, meetings)
-/// as pending episodes so the NEW pipeline re-extracts everything. Idempotent
+/// built-in worlds and re-materializes stored history (conversations) as
+/// pending episodes so the NEW pipeline re-extracts everything. Idempotent
 /// twice over: a settings flag skips the scan, and episode external_ids make
 /// re-runs merge instead of duplicate.
 enum KnowledgeBootstrap {
     static func runIfNeeded(database: JarvisDatabase, store: KnowledgeStore, settings: SettingsStore) async {
         await store.ensureWorld(id: "chat", kind: "llm_text", displayName: "Conversations", enabled: true)
-        await store.ensureWorld(id: "meetings", kind: "llm_text", displayName: "Meetings", enabled: true)
         await store.ensureWorld(id: "screen", kind: "llm_text", displayName: "Screen", enabled: true)
 
         let done = ((try? await settings.get("knowledge_bootstrap_v1", as: Bool.self)) ?? nil) ?? false
@@ -19,7 +18,6 @@ enum KnowledgeBootstrap {
 
         do {
             try await backfillConversations(database: database, store: store)
-            try await backfillMeetings(database: database, store: store)
             try? await settings.set("knowledge_bootstrap_v1", to: true)
         } catch {
             // A write failed mid-backfill: leave the flag unset so the next
@@ -66,32 +64,6 @@ enum KnowledgeBootstrap {
         _ = try? await database.writer.write { db in
             try db.execute(sql: "UPDATE message SET extracted_at = ? WHERE role = 'user' AND extracted_at IS NULL",
                            arguments: [Date.now])
-        }
-    }
-
-    /// Every meeting's transcript + overview → one pending episode.
-    private static func backfillMeetings(database: JarvisDatabase, store: KnowledgeStore) async throws {
-        struct MeetingText { let id: String, startedAt: Date, title: String?, text: String }
-        let meetings: [MeetingText] = (try? await database.reader.read { db -> [MeetingText] in
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT m.id AS id, m.started_at AS started_at, m.title AS title, m.overview AS overview,
-                       (SELECT GROUP_CONCAT(text, char(10)) FROM meeting_segment ms
-                        WHERE ms.meeting_id = m.id) AS transcript
-                FROM meeting m
-                """)
-            return rows.compactMap { row in
-                let overview: String? = row["overview"]
-                let transcript: String? = row["transcript"]
-                let text = [overview, transcript].compactMap(\.self).joined(separator: "\n")
-                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-                return MeetingText(id: row["id"], startedAt: row["started_at"], title: row["title"], text: text)
-            }
-        }) ?? []
-
-        for meeting in meetings {
-            try await store.addEpisode(worldId: "meetings", externalId: "meeting:\(meeting.id)",
-                                       occurredAt: meeting.startedAt, title: meeting.title,
-                                       content: String(meeting.text.prefix(12000)))
         }
     }
 }

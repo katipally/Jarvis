@@ -11,7 +11,7 @@ struct SourcesPane: View {
     @State private var worlds: [WorldRow] = []
     @State private var fdaGranted = FullDiskAccess.granted
 
-    /// Sources the user can toggle (chat/meetings are always-on internals).
+    /// Sources the user can toggle (chat is an always-on internal).
     private static let toggleable = ["calendar", "contacts", "mail", "imessage", "notes", "browser", "screen"]
     private static let fdaWorlds: Set<String> = ["mail", "imessage", "notes", "browser"]
 

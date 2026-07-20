@@ -18,8 +18,6 @@ final class KnowledgeService {
     private let local: LocalFirst
     private let tasks: TaskStore
     private let database: JarvisDatabase
-    /// Set by AppDelegate: new validated facts flow to the facet producers.
-    var onFactsIngested: (@MainActor ([(id: String, text: String)]) -> Void)?
 
     init(core: JarvisCore, sessions: SessionManager, store: KnowledgeStore,
          local: LocalFirst, tasks: TaskStore, database: JarvisDatabase) {
@@ -179,11 +177,6 @@ final class KnowledgeService {
             invalidations: extraction.invalidations.map { ExtractedRelation(subject: $0.subject, relation: $0.relation, object: $0.object) }
         )
         await store.ingest(result, episode: episode)
-        // Facet learning sees only facts that clear the same durability gate as
-        // storage — raw extractor junk must not become 2x-weighted evidence.
-        let validated = result.facts.filter { FactValidator.isDurable($0.text, source: episode?.content) }
-        let refBase = episode?.id ?? UUID().uuidString
-        onFactsIngested?(validated.enumerated().map { (id: "\(refBase):\($0.offset)", text: $0.element.text) })
 
         for c in extraction.commitments {
             let text = c.text.trimmingCharacters(in: .whitespacesAndNewlines)
