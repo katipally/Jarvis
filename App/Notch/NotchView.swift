@@ -432,7 +432,8 @@ struct NotchView: View {
                         if abs((vm.homeBodyHeight ?? 0) - bodyHeight) > 4 {
                             vm.homeBodyHeight = bodyHeight
                         }
-                    }
+                    },
+                    onNewSession: { chat.newSession() }
                 )
             case .history:
                 HistoryView(

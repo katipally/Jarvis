@@ -472,6 +472,30 @@ final class ChatStore {
         runTask?.cancel()
     }
 
+    /// Start a fresh conversation: closes the current segment (it moves to the
+    /// History tab and memory extraction runs on it), then clears the live view
+    /// back to the greeting. Past conversations stay available under History.
+    func newSession() {
+        guard phase == .idle else { return }
+        let sessions = self.sessions
+        Task { await sessions.closeCurrentSegment() }
+        messages = []
+        transcript = []
+        input = ""
+        attachments = []
+        errorText = nil
+        activeAssistantID = nil
+        lastUserText = nil
+        hasUnreadProactive = false
+        // Clean slate: the just-closed conversation and everything older live in
+        // the History tab, not scrolled into this fresh session.
+        hasOlderHistory = false
+        historyCursor = .now
+        draftTask?.cancel()
+        let settingsStore = core.settings
+        Task { try? await settingsStore.set(Self.draftKey, to: "") }
+    }
+
     // MARK: - Per-turn context
 
     private static let contextDateFormatter: DateFormatter = {

@@ -11,6 +11,8 @@ struct HomeView: View {
     /// capped by the view model. Home is a plain chat: the full session history,
     /// newest at the bottom, auto-growing to fit then scrolling.
     var onBodyHeightChange: (CGFloat) -> Void = { _ in }
+    /// Starts a fresh conversation (the compose button / ⌘N).
+    var onNewSession: () -> Void = {}
 
     @State private var isDropTargeted = false
     @State private var contentHeight: CGFloat = 0
@@ -62,7 +64,27 @@ struct HomeView: View {
                     .transition(.opacity)
             }
         }
+        // Compose a fresh conversation. Hidden on the empty greeting (already new).
+        .overlay(alignment: .topTrailing) {
+            if !visibleMessages.isEmpty {
+                Button(action: onNewSession) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(Color.jarvisSurface))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .pointerStyle(.link)
+                .keyboardShortcut("n", modifiers: .command)
+                .help("New conversation (⌘N)")
+                .accessibilityLabel("New conversation")
+                .transition(.opacity)
+            }
+        }
         .animation(.snappy, value: isDropTargeted)
+        .animation(.snappy, value: visibleMessages.isEmpty)
     }
 
     /// The full conversation, newest at the bottom. The notch auto-grows to fit
