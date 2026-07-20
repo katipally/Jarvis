@@ -140,9 +140,9 @@ struct HomeView: View {
                         .frame(height: 8)
                 }
             }
-            // Jump to the newest message when a turn starts or a message arrives.
+            // Glide to the newest message when a turn starts or a message arrives.
             .onChange(of: chat.messages.count) { _, _ in
-                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo("bottom-anchor", anchor: .bottom) }
+                withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo("bottom-anchor", anchor: .bottom) }
             }
             // Follow the growing answer while it streams.
             .onChange(of: contentHeight) { _, _ in

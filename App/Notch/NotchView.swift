@@ -105,6 +105,13 @@ struct NotchView: View {
         reduceMotion ? .easeInOut(duration: 0.2) : NotchAnimation.tab
     }
 
+    /// Continuous height changes (answer streaming / auto-grow) use a calm,
+    /// well-damped curve — no spring bounce — so growing to fit the answer reads
+    /// as smooth rather than snapping on every token.
+    private var heightAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.25) : .smooth(duration: 0.35)
+    }
+
     /// One spring for the whole morph: the bouncy open spring when expanding to a
     /// panel, the more-damped close spring when collapsing to any compact/closed
     /// presentation. This reproduces the old per-trigger open/close choice exactly
@@ -205,7 +212,7 @@ struct NotchView: View {
         // The tray's slide + retract share the notch's morph/height timelines so
         // it stays glued to the body's bottom edge as it grows and moves.
         .animation(morphAnimation, value: presentation)
-        .animation(tabAnimation, value: vm.homeBodyHeight)
+        .animation(heightAnimation, value: vm.homeBodyHeight)
         .preferredColorScheme(.dark)
     }
 
@@ -250,7 +257,7 @@ struct NotchView: View {
         // morph — this isolation is the seam that keeps the HomeView measured-height
         // loop from reoscillating (Step 4). homeBodyHeight/homeBrowsingHistory are
         // deliberately not part of `presentation`.
-        .animation(tabAnimation, value: vm.homeBodyHeight)
+        .animation(heightAnimation, value: vm.homeBodyHeight)
         .animation(.easeInOut(duration: 0.35), value: showsGlow)
     }
 
@@ -628,10 +635,11 @@ private struct ClosedWorkingBar: View {
             }
             .frame(height: cameraHeight)
 
-            // The per-step status ("Searching the web: …"), shimmering, up to 2 lines.
+            // The per-step status ("Searching the web: …"), shimmering, kept on a
+            // single line directly below the camera cutout.
             ShimmerText(text: title)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .truncationMode(.tail)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 14)
                 .contentTransition(.opacity)

@@ -26,10 +26,10 @@ enum NotchMetrics {
     /// hugging the right, plus a one-line transcript below.
     static let listeningExtraWidth: CGFloat = 100
     static let listeningExtraHeight: CGFloat = 26
-    /// The compact "working" bar: a touch wider than closed and only tall enough
-    /// for two lines of status below the camera ("Searching the web: …").
+    /// The compact "working" bar: a touch wider than closed and tall enough for
+    /// one line of status on the second row, below the camera.
     static let workingExtraWidth: CGFloat = 160
-    static let workingExtraHeight: CGFloat = 32
+    static let workingExtraHeight: CGFloat = 26
     /// Extra height for the dictation-review state (transcript + send/cancel).
     static let reviewExtraHeight: CGFloat = 96
     /// Slack around the content so the fixed window can hold the glow bleed + shadow.
