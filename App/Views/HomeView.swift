@@ -27,6 +27,13 @@ struct HomeView: View {
         chat.messages.filter { !($0.isError && $0.text == chat.errorText) }
     }
 
+    /// The latest user message — the anchor for the current turn. Streaming keeps
+    /// this pinned to the top so the answer grows DOWNWARD (only the bottom edge
+    /// moves) instead of scrolling the whole transcript up.
+    private var lastUserID: String? {
+        visibleMessages.last(where: { $0.role == .user })?.id
+    }
+
     private func reportBodyHeight() {
         let content = visibleMessages.isEmpty ? greetingBaseHeight : contentHeight
         onBodyHeightChange(content + accessoriesHeight + 16)
@@ -118,6 +125,7 @@ struct HomeView: View {
                                 onDismiss: message.isProactive
                                     ? { chat.dismissProactive(message.id) } : nil
                             )
+                            .id(message.id)
                         }
                         Color.clear.frame(height: 1).id("bottom-anchor")
                     }
@@ -129,33 +137,43 @@ struct HomeView: View {
                     reportBodyHeight()
                 }
             }
-            .defaultScrollAnchor(.bottom)
+            // Top-anchored: as the answer grows, the offset from the top holds, so
+            // content stays put and only the bottom extends (the notch grows to
+            // fit) — no whole-transcript scroll-up while streaming.
+            .defaultScrollAnchor(.top)
             .scrollIndicators(.hidden)
             .mask {
                 VStack(spacing: 0) {
                     LinearGradient(colors: [.black.opacity(0.2), .black], startPoint: .top, endPoint: .bottom)
                         .frame(height: 10)
                     Rectangle()
-                    LinearGradient(colors: [.black, .black.opacity(0.2)], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 8)
+                    // While streaming, a taller fade at the bottom so each new
+                    // line materializes (fades in) as it appears, then solidifies.
+                    LinearGradient(colors: [.black, .black.opacity(chat.phase == .responding ? 0.0 : 0.2)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: chat.phase == .responding ? 32 : 8)
                 }
+                .animation(.smooth(duration: 0.35), value: chat.phase)
             }
-            // Glide to the newest message when a turn starts or a message arrives.
+            // Frame the current turn: pin the latest question to the top so its
+            // answer grows downward beneath it.
             .onChange(of: chat.messages.count) { _, _ in
-                withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo("bottom-anchor", anchor: .bottom) }
+                withAnimation(.smooth(duration: 0.35)) { scrollToTurn(proxy) }
             }
-            // Follow the growing answer while it streams.
-            .onChange(of: contentHeight) { _, _ in
-                guard chat.phase == .responding else { return }
-                proxy.scrollTo("bottom-anchor", anchor: .bottom)
-            }
-            // Land at the newest message when the panel first shows.
             .onAppear {
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(50))
-                    proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                    scrollToTurn(proxy)
                 }
             }
+        }
+    }
+
+    private func scrollToTurn(_ proxy: ScrollViewProxy) {
+        if let id = lastUserID {
+            proxy.scrollTo(id, anchor: .top)
+        } else {
+            proxy.scrollTo("bottom-anchor", anchor: .bottom)
         }
     }
 
