@@ -101,15 +101,6 @@ struct HomeView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    if chat.hasOlderHistory {
-                        HStack {
-                            Spacer()
-                            ProgressView().controlSize(.mini)
-                            Spacer()
-                        }
-                        .padding(.vertical, 6)
-                        .onAppear { chat.loadOlderHistory() }
-                    }
                     if visibleMessages.isEmpty {
                         GreetingView()
                             .containerRelativeFrame(.vertical) { height, _ in height * 0.96 }
@@ -353,6 +344,18 @@ struct MessageRow: View {
                         .symbolRenderingMode(.hierarchical)
                         .font(.system(size: 12))
                         .foregroundStyle(Color.jarvisError)
+                } else if message.isStreaming {
+                    // Lightweight plain text while streaming (no per-token Markdown
+                    // re-parse/reflow); swaps to full Markdown once the answer
+                    // settles below.
+                    if message.text.isEmpty {
+                        ThinkingDots()
+                    } else {
+                        Text(message.text)
+                            .font(.jarvisBody)
+                            .foregroundStyle(Color.jarvisTextPrimary)
+                            .textSelection(.enabled)
+                    }
                 } else if !message.text.isEmpty {
                     Markdown(message.text)
                         .markdownTheme(.jarvis)
@@ -363,8 +366,6 @@ struct MessageRow: View {
                                 Button("Try again", action: onRetry)
                             }
                         }
-                } else if message.isStreaming {
-                    ThinkingDots()
                 }
                 if message.isStopped {
                     Label("Stopped", systemImage: "stop.circle")

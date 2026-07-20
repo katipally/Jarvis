@@ -182,11 +182,8 @@ final class ChatStore {
     private var lastUserText: String?
     private var queuedProactive: [String] = []
 
-    // Scroll-up lazy history (iMessage style): persisted turns older than this
-    // session's in-memory rows load in pages as the user reaches the top.
-    private(set) var hasOlderHistory = true
-    private var historyCursor = Date.now // everything before launch is "older"
-    private var historyLoadInFlight = false
+    // Home shows ONLY the current conversation. Older/closed conversations live
+    // in the History tab and never scroll into this view.
 
     /// The system prompt is deliberately static — every dynamic fact (time,
     /// frontmost app, memory) rides in the user turn so the provider prompt
@@ -220,10 +217,9 @@ final class ChatStore {
         self.core = core
         self.sessions = sessions
         self.agent = agent
-        // Restore the tail of the conversation right away (iMessage-style):
-        // relaunching shows where you left off; the greeting appears only when
-        // there is no history at all. Scroll-up pages further back.
-        loadOlderHistory()
+        // Show the most recent conversation on launch — but only if it's still
+        // within the session gap; otherwise start on a fresh greeting.
+        restoreCurrentSession()
         // A half-typed message survives a relaunch.
         let settings = core.settings
         Task { @MainActor [weak self] in
@@ -323,7 +319,6 @@ final class ChatStore {
                 // stays stuck showing the old conversation.
                 if let self, let lastUser = self.messages.lastIndex(where: { $0.role == .user }) {
                     self.messages = Array(self.messages[lastUser...])
-                    self.hasOlderHistory = false
                 }
             }
 
@@ -454,8 +449,6 @@ final class ChatStore {
             // Rebuild the model-facing transcript from the persisted blocks so
             // the model actually has the conversation, not just the pixels.
             self.transcript = stored.map { NeutralMessage(role: $0.role, content: $0.content) }
-            self.historyCursor = stored.first?.createdAt ?? .now
-            self.hasOlderHistory = true
             self.errorText = nil
             self.activeAssistantID = nil
             // "Try again" must never re-send a prompt from the previous
@@ -514,8 +507,6 @@ final class ChatStore {
         hasUnreadProactive = false
         // Clean slate: the just-closed conversation and everything older live in
         // the History tab, not scrolled into this fresh session.
-        hasOlderHistory = false
-        historyCursor = .now
         draftTask?.cancel()
         let settingsStore = core.settings
         Task { try? await settingsStore.set(Self.draftKey, to: "") }
@@ -648,6 +639,9 @@ final class ChatStore {
     }
 
     private func deliverProactive(_ text: String) {
+        // A fresh nudge counts as activity, so opening the notch won't treat the
+        // conversation as idle-stale and clear it out from under the message.
+        lastInteraction = .now
         var proactive = DisplayMessage(id: UUID().uuidString, role: .assistant, text: text)
         proactive.isProactive = true
         messages.append(proactive)
@@ -665,25 +659,23 @@ final class ChatStore {
 
     func markProactiveRead() { hasUnreadProactive = false }
 
-    /// Prepends one page of persisted conversation (all sessions, newest first)
-    /// when the user scrolls to the top of the transcript.
-    func loadOlderHistory() {
-        guard hasOlderHistory, !historyLoadInFlight else { return }
-        historyLoadInFlight = true
-        let cutoff = historyCursor
+    /// On launch, load ONLY the most recent conversation and make it active — and
+    /// only if it's still within the session gap; a stale one stays in History and
+    /// the view opens on a fresh greeting. Never loads across segments, so closed
+    /// conversations can't leak into (or scroll into) the current view.
+    private func restoreCurrentSession() {
+        let gap = TimeInterval(max(1, core.sessionGapMinutes) * 60)
+        guard Date.now.timeIntervalSince(lastInteraction) <= gap else { return }
         let sessions = self.sessions
         Task { @MainActor [weak self] in
-            let older = await sessions.messagesBefore(cutoff)
-            guard let self else { return }
-            self.historyLoadInFlight = false
-            guard !older.isEmpty else {
-                self.hasOlderHistory = false
-                return
-            }
-            self.historyCursor = older.first?.createdAt ?? cutoff
-            let rows = DisplayMessage.rows(from: older)
-            self.messages.insert(contentsOf: rows, at: 0)
-            if older.count < 30 { self.hasOlderHistory = false }
+            guard let self, self.messages.isEmpty, self.phase == .idle else { return }
+            guard let last = await sessions.recentSegments(limit: 1).first else { return }
+            await sessions.resumeSegment(last.id)
+            let stored = await sessions.messages(inSegment: last.id)
+            // Re-check after the suspensions — a send/continue may have started.
+            guard self.messages.isEmpty, self.phase == .idle else { return }
+            self.messages = DisplayMessage.rows(from: stored)
+            self.transcript = stored.map { NeutralMessage(role: $0.role, content: $0.content) }
         }
     }
 
