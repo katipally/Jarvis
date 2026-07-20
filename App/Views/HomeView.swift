@@ -16,6 +16,7 @@ struct HomeView: View {
 
     @State private var isDropTargeted = false
     @State private var contentHeight: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
     @State private var accessoriesHeight: CGFloat = 0
 
     /// Comfortable body height for the greeting (no conversation yet).
@@ -155,10 +156,28 @@ struct HomeView: View {
                 }
                 .animation(.smooth(duration: 0.35), value: chat.phase)
             }
-            // Frame the current turn: pin the latest question to the top so its
-            // answer grows downward beneath it.
+            // Frame the current turn ONCE when it starts — pin the question to the
+            // top so the answer grows beneath it. Nothing scrolls mid-stream, so
+            // existing text never shifts (only new lines append below).
+            .onChange(of: chat.phase) { _, phase in
+                if phase == .responding {
+                    withAnimation(.smooth(duration: 0.35)) { scrollToTurn(proxy) }
+                }
+            }
+            // A message arriving while idle (e.g. a proactive nudge) reveals itself.
             .onChange(of: chat.messages.count) { _, _ in
+                guard chat.phase != .responding else { return }
                 withAnimation(.smooth(duration: 0.35)) { scrollToTurn(proxy) }
+            }
+            // Track the visible height so we know when the answer overflows.
+            .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, h in
+                viewportHeight = h
+            }
+            // Once the answer overflows the panel (max height reached), follow the
+            // bottom so the newest tokens stay visible; below that it's stationary.
+            .onChange(of: contentHeight) { _, _ in
+                guard chat.phase == .responding, contentHeight > viewportHeight + 4 else { return }
+                proxy.scrollTo("bottom-anchor", anchor: .bottom)
             }
             .onAppear {
                 Task { @MainActor in
