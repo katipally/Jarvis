@@ -603,7 +603,9 @@ private struct PulsingDot: View {
     }
 }
 
-/// Closed-notch background-run pulse: Jarvis is answering while closed.
+/// Compact "thinking" bar: the status text shimmers Apple-Intelligence style
+/// below the camera while the animated edge glow breathes. No competing icons —
+/// the shimmer + glow carry the "working" signal.
 private struct ClosedWorkingBar: View {
     var activity: ChatStore.LiveActivity?
     let cameraWidth: CGFloat
@@ -615,29 +617,19 @@ private struct ClosedWorkingBar: View {
     private var title: String { activity?.title ?? "Working" }
 
     var body: some View {
-        VStack(spacing: 1) {
+        VStack(spacing: 2) {
             HStack(spacing: 0) {
-                Image(systemName: activity?.symbol ?? "sparkles")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.75))
-                    .symbolEffect(.pulse, isActive: !reduceMotion)
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(maxWidth: .infinity)
+                Color.clear.frame(maxWidth: .infinity)
                     .morphAnchor(MorphID.leftFlank, in: morphNamespace, active: !reduceMotion)
                 Color.clear.frame(width: cameraWidth + NotchMetrics.cameraSideReserve)
                     .morphAnchor(MorphID.camera, in: morphNamespace, active: !reduceMotion)
-                ProgressView()
-                    .controlSize(.mini)
-                    .frame(maxWidth: .infinity)
+                Color.clear.frame(maxWidth: .infinity)
                     .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
             }
             .frame(height: cameraHeight)
 
-            // The Live Activity's per-step label, below the camera cutout.
-            // Two lines so the verbose status ("Searching the web: …") fits.
-            Text(title)
-                .font(.jarvisCaption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.9))
+            // The per-step status ("Searching the web: …"), shimmering, up to 2 lines.
+            ShimmerText(text: title)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
@@ -646,9 +638,39 @@ private struct ClosedWorkingBar: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Jarvis: \(title)")
-        // Crossfade the label + swap the symbol as each tool step refines the
-        // activity, so the Live Activity updates smoothly instead of snapping.
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: title)
+    }
+}
+
+/// Apple-Intelligence-style shimmer: a bright band sweeps across dim text.
+/// Static (dim white) under Reduce Motion.
+struct ShimmerText: View {
+    let text: String
+    var font: Font = .jarvisCaption.weight(.medium)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let label = Text(text).font(font)
+        if reduceMotion {
+            label.foregroundStyle(.white.opacity(0.9))
+        } else {
+            label
+                .foregroundStyle(.white.opacity(0.4))
+                .overlay {
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                        let t = context.date.timeIntervalSinceReferenceDate
+                        let p = CGFloat((t.truncatingRemainder(dividingBy: 1.8)) / 1.8)
+                        GeometryReader { geo in
+                            let w = geo.size.width
+                            LinearGradient(colors: [.clear, .white, .clear],
+                                           startPoint: .leading, endPoint: .trailing)
+                                .frame(width: max(44, w * 0.5))
+                                .offset(x: -w * 0.5 + (w * 1.5) * p)
+                        }
+                        .mask(label.foregroundStyle(.white))
+                    }
+                }
+        }
     }
 }
 
