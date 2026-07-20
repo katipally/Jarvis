@@ -118,13 +118,20 @@ public struct KnowledgeStore: Sendable {
     @discardableResult
     public func ingest(_ result: KnowledgeExtractionResult, episode: EpisodeRow?,
                        bypassValidation: Bool = false, now: Date = .now) async -> IngestCounts {
-        // Per-episode caps: the 3B extractor occasionally floods; keep the top
-        // slice by salience rather than trusting it to self-limit.
+        // Selective memory (omi's "few facts per conversation" discipline):
+        // indexing everything corrupts the profile, so only the vital few enter.
+        // Drop low-salience trivia (the extractor's "low" → 0.2), then keep the
+        // top slice by salience. Explicit `remember` (bypassValidation) skips the
+        // floor — a direct instruction always wins.
+        // ponytail: floor 0.35 + cap 4; loosen if recall feels thin, tighten if noisy.
+        let salienceFloor = 0.35
+        let perEpisodeCap = 4
         let facts = result.facts
             .map { ExtractedFact(text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines), salience: $0.salience) }
             .filter { bypassValidation ? !$0.text.isEmpty : FactValidator.isDurable($0.text, source: episode?.content) }
+            .filter { bypassValidation || $0.salience >= salienceFloor }
             .sorted { $0.salience > $1.salience }
-            .prefix(8)
+            .prefix(perEpisodeCap)
         let entities = result.entities.filter { FactValidator.isRealEntity($0.name) }.prefix(10)
         let relations = result.relations.prefix(10)
         let invalidations = result.invalidations.prefix(5)
