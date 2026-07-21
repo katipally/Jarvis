@@ -84,6 +84,9 @@ struct SettingsView: View {
     @State private var loadingModels: Set<String> = []
     @State private var showAddProvider = false
     @State private var pendingDelete: ProviderAccount?
+    /// Voice review gate — off by default (auto-send on release). Read
+    /// synchronously by VoiceController via the same UserDefaults key.
+    @AppStorage(VoiceController.confirmBeforeSendKey) private var confirmBeforeSend = false
 
     private static let sessionGapChoices = [2, 5, 10, 15, 30, 60]
 
@@ -93,6 +96,7 @@ struct SettingsView: View {
                 providersSection
                 rolesSection
                 sessionsSection
+                voiceSection
                 privacySection
                 if let knowledge, let worlds {
                     JarvisSectionHeader(title: "Sources").padding(.horizontal, 16)
@@ -161,6 +165,28 @@ struct SettingsView: View {
     }
 
     // MARK: - Privacy
+
+    private var voiceSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            JarvisSectionHeader(title: "Voice")
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Confirm before sending")
+                        .font(.jarvisBody).foregroundStyle(.white.opacity(0.85))
+                    Text("Show a Send/Cancel review of the transcript when you release the push-to-talk key. Off sends the moment you let go.")
+                        .font(.jarvisFootnote).foregroundStyle(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Toggle("", isOn: $confirmBeforeSend)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(Color.jarvisAccent)
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.jarvisSurface))
+        }
+    }
 
     private var privacySection: some View {
         VStack(alignment: .leading, spacing: 12) {

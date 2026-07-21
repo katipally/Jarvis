@@ -16,7 +16,7 @@ struct ListeningView: View {
             HStack(spacing: 0) {
                 Waveform(level: voice.level, active: voice.phase == .listening)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 7)
+                    .padding(.trailing, 12) // clear gap so the tallest bar never kisses the camera
                     .accessibilityHidden(true)
                     .morphAnchor(MorphID.leftFlank, in: morphNamespace, active: !reduceMotion)
                 Color.clear.frame(width: cameraWidth + NotchMetrics.cameraSideReserve)
@@ -24,7 +24,7 @@ struct ListeningView: View {
                 Waveform(level: voice.level, active: voice.phase == .listening)
                     .scaleEffect(x: -1, y: 1) // mirror so the tall bars hug the camera
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 7)
+                    .padding(.leading, 12)
                     .accessibilityHidden(true)
                     .morphAnchor(MorphID.rightFlank, in: morphNamespace, active: !reduceMotion)
             }

@@ -65,6 +65,11 @@ final class VoiceController {
         }
     }
 
+    /// When true, releasing the push-to-talk key opens a Send/Cancel review gate
+    /// instead of sending immediately. Off by default (auto-send on release);
+    /// mirrored by the Settings toggle. Absent key → false → auto-send.
+    static let confirmBeforeSendKey = "voice_confirm_before_send"
+
     func endListening() {
         guard phase == .listening else { return }
         phase = .processing
@@ -77,13 +82,13 @@ final class VoiceController {
             self.engine = nil
             let text = (finalText.isEmpty ? self.transcript : finalText)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if text.isEmpty {
-                self.phase = .idle
-            } else {
-                // Review before send: the transcript is shown in full with
-                // explicit send/cancel instead of firing on release.
-                self.finalized = text
-                self.partial = ""
+            guard !text.isEmpty else { self.phase = .idle; return }
+            self.finalized = text
+            self.partial = ""
+
+            if UserDefaults.standard.bool(forKey: Self.confirmBeforeSendKey) {
+                // Opt-in review gate: show the transcript with explicit
+                // send/cancel instead of firing on release.
                 self.phase = .review
                 // A forgotten review must not linger armed forever — after 30s
                 // the transcript lands in the composer as a draft instead.
@@ -93,6 +98,12 @@ final class VoiceController {
                     guard !Task.isCancelled else { return }
                     self?.abandonReview()
                 }
+            } else if let chat = self.chat, chat.phase == .idle {
+                // Default: send the moment you let go.
+                self.sendAndAwaitAnswer(text)
+            } else {
+                // A run is mid-flight — park the transcript rather than drop it.
+                self.parkOrDiscard(text)
             }
         }
     }
@@ -116,7 +127,12 @@ final class VoiceController {
     func abandonReview() {
         guard phase == .review else { return }
         reviewTimeoutTask?.cancel()
-        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        parkOrDiscard(transcript.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// Salvage a transcript into the composer (unless a draft is already there)
+    /// and return to idle. Shared by review timeout and the auto-send busy path.
+    private func parkOrDiscard(_ text: String) {
         if let chat, !text.isEmpty, chat.input.trimmingCharacters(in: .whitespaces).isEmpty {
             chat.input = text
         }
