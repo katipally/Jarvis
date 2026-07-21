@@ -153,7 +153,7 @@ final class NotchScreenManager {
             let zone = panel.vm.visibleRect(open: true)
                 .union(panel.vm.trayRect(open: true))
                 .insetBy(dx: -8, dy: -8)
-            guard !zone.contains(pointer), canAutoClose(panel) else { continue }
+            guard !zone.contains(pointer), canAutoClose(panel, allowPressedButton: true) else { continue }
             outsideSince[id] = nil
             withAnimation(NotchAnimation.close) { panel.vm.close() }
         }
@@ -338,12 +338,16 @@ final class NotchScreenManager {
     /// (state / holdOpen / 0.6s-since-open) passes AND nothing here demands the
     /// panel stay up: an in-flight response, an active voice session, or a held
     /// mouse button (drag / text selection in progress).
-    private func canAutoClose(_ panel: Panel) -> Bool {
+    private func canAutoClose(_ panel: Panel, allowPressedButton: Bool = false) -> Bool {
         guard panel.vm.canAutoClose else { return false }
         if chat?.phase == .responding { return false }
         if chat?.isWorkingCompact == true { return false }
         if voice?.isActive == true { return false }
-        if NSEvent.pressedMouseButtons != 0 { return false }
+        // The pressed-button guard protects the HOVER path from closing mid-drag
+        // or mid-text-selection. A deliberate click-away is itself a press, so
+        // that path opts out — else it could never close (the bug: only the
+        // grace timer fired, the click did nothing).
+        if !allowPressedButton, NSEvent.pressedMouseButtons != 0 { return false }
         return true
     }
 }
