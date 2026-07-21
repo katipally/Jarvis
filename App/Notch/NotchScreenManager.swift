@@ -45,12 +45,15 @@ final class NotchScreenManager {
     /// System agents that present permission/auth dialogs. While one of these is
     /// frontmost, panels drop below dialog level so the prompt is never hidden
     /// behind the notch.
+    /// Lowercased so the membership check can't be broken by a casing typo (it
+    /// was: the accessibility prompt's agent is `com.apple.universalaccessAuthWarn`,
+    /// which never matched the miswritten id and so was hidden behind the notch).
     private nonisolated static let systemDialogAgents: Set<String> = [
-        "com.apple.UserNotificationCenter",   // TCC permission alerts
-        "com.apple.SecurityAgent",            // keychain / authorization
+        "com.apple.usernotificationcenter",   // TCC permission alerts
+        "com.apple.securityagent",            // keychain / authorization
         "com.apple.coreservices.uiagent",     // gatekeeper & consent prompts
-        "com.apple.CoreLocationAgent",
-        "com.apple.accessibility.universalAccessAuthWarn",
+        "com.apple.corelocationagent",
+        "com.apple.universalaccessauthwarn",  // "control this computer" accessibility prompt
     ]
 
     func start(core: JarvisCore, chat: ChatStore, voice: VoiceController) {
@@ -84,7 +87,7 @@ final class NotchScreenManager {
         ) { [weak self] note in
             let bundleID = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?
                 .bundleIdentifier
-            let yields = bundleID.map(Self.systemDialogAgents.contains) ?? false
+            let yields = bundleID.map { Self.systemDialogAgents.contains($0.lowercased()) } ?? false
             Task { @MainActor in
                 guard let self else { return }
                 for (_, panel) in self.panels {
