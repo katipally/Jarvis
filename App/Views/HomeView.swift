@@ -12,6 +12,11 @@ struct HomeView: View {
     var onBodyHeightChange: (CGFloat) -> Void = { _ in }
     /// Starts a fresh conversation (the compose button / ⌘N).
     var onNewSession: () -> Void = {}
+    /// Bumped by the "Latest" pill to jump the transcript back to the newest row.
+    var scrollToLatestTick: Int = 0
+    /// Reports whether the user has scrolled up off the bottom, so the tray can
+    /// swap the composer for the "Latest" pill.
+    var onScrolledUpChange: (Bool) -> Void = { _ in }
 
     @State private var isDropTargeted = false
     @State private var contentHeight: CGFloat = 0
@@ -155,6 +160,19 @@ struct HomeView: View {
             // Track the visible height so we know when the answer overflows.
             .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, h in
                 viewportHeight = h
+            }
+            // Scrolled up = content overflows AND we're not pinned near the
+            // bottom. Drives the composer↔"Latest" pill swap.
+            .onScrollGeometryChange(for: Bool.self) { geo in
+                let maxOffset = geo.contentSize.height - geo.containerSize.height
+                return maxOffset > 8 && geo.contentOffset.y < maxOffset - 24
+            } action: { _, up in
+                onScrolledUpChange(up)
+            }
+            // The "Latest" pill jumps back to the newest row; the resulting
+            // geometry change flips scrolled-up off and restores the composer.
+            .onChange(of: scrollToLatestTick) { _, _ in
+                withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo("bottom-anchor", anchor: .bottom) }
             }
             // Once the transcript overflows the panel (max height reached), follow
             // the bottom on ANY content growth so the latest interaction stays

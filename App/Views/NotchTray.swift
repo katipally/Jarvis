@@ -9,6 +9,9 @@ enum NotchTrayMode: Equatable {
     case composer
     case stop
     case continueChat
+    /// Browsing up through the current session: the composer collapses into a
+    /// "jump to newest" pill until the transcript is back at the bottom.
+    case backToLatest
 }
 
 /// The detached Liquid-Glass pill that lives BELOW the notch's bottom border. It
@@ -19,6 +22,8 @@ struct NotchTray: View {
     @Bindable var chat: ChatStore
     var voice: VoiceController?
     var onContinue: () -> Void = {}
+    /// Jump the transcript back to the newest message (the "Latest" pill).
+    var onBackToLatest: () -> Void = {}
 
     @FocusState private var inputFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -32,6 +37,10 @@ struct NotchTray: View {
             case .continueChat:
                 actionPill(icon: "arrow.uturn.left", label: "Continue",
                            action: onContinue)
+            case .backToLatest:
+                // No Esc binding here — Esc should close the notch, not scroll.
+                actionPill(icon: "arrow.down", label: "Latest", cancelShortcut: false,
+                           action: onBackToLatest)
             case .hidden: EmptyView()
             }
         }
@@ -130,7 +139,8 @@ struct NotchTray: View {
 
     // MARK: - Action pills (Back to latest / Continue)
 
-    private func actionPill(icon: String, label: String, action: @escaping () -> Void) -> some View {
+    private func actionPill(icon: String, label: String, cancelShortcut: Bool = true,
+                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
@@ -146,7 +156,7 @@ struct NotchTray: View {
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
-        .keyboardShortcut(.cancelAction)
+        .keyboardShortcut(cancelShortcut ? .cancelAction : nil)
         .accessibilityLabel(label)
     }
 }

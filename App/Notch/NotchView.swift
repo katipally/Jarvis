@@ -28,6 +28,11 @@ struct NotchView: View {
     /// Which History conversation is open in the detail view (drives the tray's
     /// "Continue" slot). Mirrored from HistoryView.
     @State private var historyOpenSegmentID: String?
+    /// True while the user has scrolled up through the current Home session, so
+    /// the composer collapses into the "Latest" pill. Bumping the tick jumps the
+    /// transcript back to the newest message.
+    @State private var homeScrolledUp = false
+    @State private var scrollToLatestTick = 0
     @Namespace private var tabPillNamespace
     /// Shared geometry namespace for the compact-bar → open morph: the camera
     /// void and the left/right flanks physically travel into the tab header
@@ -173,7 +178,7 @@ struct NotchView: View {
     private var trayMode: NotchTrayMode {
         if chat?.phase == .responding { return .stop }
         switch vm.selectedTab {
-        case .home: return .composer
+        case .home: return homeScrolledUp ? .backToLatest : .composer
         case .history: return historyOpenSegmentID != nil ? .continueChat : .hidden
         default: return .hidden
         }
@@ -188,11 +193,13 @@ struct NotchView: View {
                     mode: trayMode,
                     chat: chat,
                     voice: voice,
-                    onContinue: continueOpenHistory
+                    onContinue: continueOpenHistory,
+                    onBackToLatest: { scrollToLatestTick += 1 }
                 )
                 .frame(width: trayWidth)
                 .offset(y: displayedSize.height + NotchMetrics.trayGap)
                 .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.snappy, value: trayMode)
                 .zIndex(0)
             }
             notchBody
@@ -465,7 +472,9 @@ struct NotchView: View {
                             vm.homeBodyHeight = bodyHeight
                         }
                     },
-                    onNewSession: { chat.newSession() }
+                    onNewSession: { chat.newSession() },
+                    scrollToLatestTick: scrollToLatestTick,
+                    onScrolledUpChange: { homeScrolledUp = $0 }
                 )
             case .history:
                 HistoryView(
