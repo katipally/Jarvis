@@ -16,6 +16,9 @@ struct DisplayMessage: Identifiable, Equatable {
     var isStreaming: Bool = false
     var isError: Bool = false
     var toolName: String? = nil
+    /// A human-readable label for the tool call (e.g. "Add reminder 'Buy milk'"),
+    /// from the tool's own `summarize` closure. Falls back to the raw name.
+    var toolTitle: String? = nil
     var toolState: ToolState? = nil
     /// A Jarvis-initiated (proactive) message the user can act on inline.
     var isProactive: Bool = false
@@ -191,34 +194,11 @@ final class ChatStore {
 
     // Home shows ONLY the current conversation. Older/closed conversations live
     // in the History tab and never scroll into this view.
-
-    /// The system prompt is deliberately static — every dynamic fact (time,
-    /// frontmost app, memory) rides in the user turn so the provider prompt
-    /// cache stays valid across turns and sessions.
-    private static let systemPrompt = """
-    You are Jarvis, the assistant that lives in the notch at the top of this Mac's screen. \
-    You are a fast, capable alternative to Siri: you answer questions, control the Mac, \
-    manage calendars, reminders, mail, and notes, remember things across conversations, \
-    and can see the screen when asked.
-
-    ## Tools
-    You have tools to inspect and act on this Mac. Prefer acting over describing: when the \
-    user asks for something a tool can do, do it. Read-only tools run instantly; tools \
-    that change anything ask the user for approval first — never promise an action \
-    succeeded before its result comes back. If a tool fails, say what failed and try a \
-    sensible alternative before giving up. Use `remember` when the user tells you \
-    something worth keeping ("remember that…", preferences, facts about themselves).
-
-    ## Style
-    You live in a small panel: be brief. Lead with the answer, not preamble. One short \
-    paragraph is the norm; use Markdown lists or code blocks only when structure genuinely \
-    helps. Match the user's language. If you don't know, say so plainly. Never invent \
-    facts about the user's machine, files, or calendar — check with a tool instead.
-
-    A `<context>` block in the user's message carries the current date, time, frontmost \
-    app, and relevant memories. Treat it as ground truth for "today", "tomorrow", and \
-    similar references; never echo the block itself.
-    """
+    //
+    // The system prompt (assembled from agent.md + the live tool catalog) lives
+    // on AgentServices and is byte-stable across turns; every dynamic fact
+    // (time, frontmost app, memory, per-turn skills) rides in the user turn so
+    // the provider prompt cache stays valid across turns and sessions.
 
     init(core: JarvisCore, sessions: SessionManager, agent: AgentServices) {
         self.core = core
@@ -306,6 +286,7 @@ final class ChatStore {
         let tools = core.privateMode ? agent.tools.readOnlyOnly() : agent.tools
         let gate = agent.gate
         let runStore = agent.runStore
+        let skills = agent.skills
         let sessions = self.sessions
         let memory = self.memory
         let adapter = resolved.adapter
@@ -332,10 +313,14 @@ final class ChatStore {
             // Dynamic per-turn context (date/time, frontmost app, memory) rides
             // in the user turn so the system prompt stays byte-stable for caching.
             let memoryContext = await memory?.context(for: userText)
-            let userMessage = NeutralMessage.user(
-                Self.contextBlock(memory: memoryContext) + "\n\n" + userText,
-                images: images
-            )
+            var prefix = Self.contextBlock(memory: memoryContext)
+            // Skills relevant to THIS turn ride in the user message (not the
+            // static system prompt), so only what's needed is sent and the
+            // provider cache stays warm.
+            if let skillsBlock = skills.promptBlock(for: userText) {
+                prefix += "\n\n<skills>\n\(skillsBlock)\n</skills>"
+            }
+            let userMessage = NeutralMessage.user(prefix + "\n\n" + userText, images: images)
             guard let self else { return }
             self.transcript.append(userMessage)
             _ = try? await sessions.append(role: .user, content: [.text(userText)] + images.map(ContentBlock.image), status: .complete)
@@ -343,7 +328,7 @@ final class ChatStore {
 
             let loop = AgentLoop(
                 adapter: adapter, tools: tools, gate: gate,
-                config: .init(model: model, system: Self.systemPrompt, effort: effort, maxTokens: 8192, maxTurns: 12),
+                config: .init(model: model, system: agent.systemPrompt, effort: effort, maxTokens: 8192, maxTurns: 12),
                 spill: { name, content in await artifactStore.spill(runID: runID, toolName: name, content: content) }
             )
 
@@ -377,7 +362,10 @@ final class ChatStore {
                     }
                 case .toolCallStarted(let id, let name, let input):
                     self.foregroundStatus = Self.activityLabel(forTool: name, input: input)
-                    self.messages.append(DisplayMessage(id: id, role: .tool, toolName: name, toolState: .running))
+                    // The tool's own summarize closure gives the row a readable
+                    // label ("Add reminder 'Buy milk'") instead of the raw name.
+                    let title = tools.tool(named: name)?.summarize?(input)
+                    self.messages.append(DisplayMessage(id: id, role: .tool, toolName: name, toolTitle: title, toolState: .running))
                     await runStore.toolStarted(id: id, runID: runID, name: name, input: input)
                 case .toolCallFinished(let id, let output, let isError, let artifactID):
                     self.updateToolRow(id: id, output: output, isError: isError)
@@ -596,7 +584,7 @@ final class ChatStore {
         backgroundStatus = WorkingStatus(title: "Thinking", symbol: "sparkles")
         defer { backgroundStatus = nil }
         let recalled = await memory?.context(for: q) ?? nil
-        let system = Self.systemPrompt + (recalled.map { "\n\n<context>\n\($0)\n</context>" } ?? "")
+        let system = agent.systemPrompt + (recalled.map { "\n\n<context>\n\($0)\n</context>" } ?? "")
         return await localFirst?.text(instructions: system, prompt: q, maxTokens: 800)
             ?? "I couldn't answer that — check that a model is configured in Jarvis Settings."
     }

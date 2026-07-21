@@ -83,6 +83,22 @@ public struct ToolRegistry: Sendable {
 
     public var isEmpty: Bool { tools.isEmpty }
 
+    /// A compact catalog of the available tools for the system prompt: name +
+    /// the first line of each description, sorted by name so the rendered prompt
+    /// stays byte-identical across launches (the provider cache stays warm).
+    /// Lets the prompt list tools straight from the registry instead of a
+    /// hand-maintained, drift-prone hardcoded list.
+    public var promptCatalog: String {
+        tools.values
+            .sorted { $0.name < $1.name }
+            .map { spec in
+                let firstLine = spec.description.split(separator: "\n", maxSplits: 1).first.map(String.init)
+                    ?? spec.description
+                return "- `\(spec.name)` — \(firstLine)"
+            }
+            .joined(separator: "\n")
+    }
+
     /// The registry an unattended background run may hold: read-only tools that
     /// don't expose private user content (no clipboard, no screen, no app UI).
     public func readOnlyOnly() -> ToolRegistry {

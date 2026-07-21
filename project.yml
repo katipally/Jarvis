@@ -19,6 +19,10 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: App
+        excludes:
+          - "Agent/Prompts"
+      - path: App/Agent/Prompts
+        buildPhase: resources
     dependencies:
       - package: JarvisKit
         products:

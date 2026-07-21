@@ -400,6 +400,15 @@ struct MessageRow: View {
     }
 }
 
+private extension String {
+    /// "reminders_add" → "Reminders add". Fallback label for restored history
+    /// rows, which carry no live `summarize` result.
+    var humanizedToolName: String {
+        let spaced = replacingOccurrences(of: "_", with: " ")
+        return spaced.prefix(1).uppercased() + spaced.dropFirst()
+    }
+}
+
 private struct ToolRow: View {
     let message: DisplayMessage
 
@@ -447,9 +456,11 @@ private struct ToolRow: View {
                             .font(.jarvisCaption)
                             .foregroundStyle(tint)
                     }
-                    Text(message.toolName ?? "tool")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    Text(message.toolTitle ?? message.toolName?.humanizedToolName ?? "tool")
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     if message.toolState == .running {
                         Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
                             .font(.jarvisFootnote)
