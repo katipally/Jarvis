@@ -567,15 +567,19 @@ private struct ClosedWorkingBar: View {
             }
             .frame(height: cameraHeight)
 
-            // The per-step status ("Searching the web: …"), shimmering, kept on a
-            // single line directly below the camera cutout.
+            // The working bar is two lines tall; push the per-step status
+            // ("Searching the web: …") down to the last line, close to the
+            // bottom rim, instead of leaving it stranded under the camera.
+            Spacer(minLength: 0)
             ShimmerText(text: title)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 14)
+                .padding(.bottom, 6)
                 .contentTransition(.opacity)
         }
+        .frame(maxHeight: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Jarvis: \(title)")
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: title)
