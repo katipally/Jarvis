@@ -22,6 +22,10 @@ struct HomeView: View {
     @State private var contentHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
     @State private var accessoriesHeight: CGFloat = 0
+    /// True once the user has scrolled up off the bottom. Freezes the
+    /// auto-follow so browsing history isn't yanked back down when the
+    /// LazyVStack re-measures its height as rows lazily instantiate.
+    @State private var scrolledUp = false
 
     /// Comfortable body height for the greeting (no conversation yet).
     private let greetingBaseHeight: CGFloat = 190
@@ -167,6 +171,7 @@ struct HomeView: View {
                 let maxOffset = geo.contentSize.height - geo.containerSize.height
                 return maxOffset > 8 && geo.contentOffset.y < maxOffset - 24
             } action: { _, up in
+                scrolledUp = up
                 onScrolledUpChange(up)
             }
             // The "Latest" pill jumps back to the newest row; the resulting
@@ -175,13 +180,15 @@ struct HomeView: View {
                 withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo("bottom-anchor", anchor: .bottom) }
             }
             // Once the transcript overflows the panel (max height reached), follow
-            // the bottom on ANY content growth so the latest interaction stays
-            // visible — streaming tokens, the plain→Markdown reflow when a turn
-            // settles, and a new prompt/answer appended while already at max height
-            // (the "it just keeps adding off-screen" case). Static content that
-            // isn't growing never moves, so manual scroll-up still works.
+            // the bottom on content growth so the latest interaction stays visible
+            // — streaming tokens, the plain→Markdown reflow when a turn settles,
+            // and a new prompt/answer appended while already at max height. But
+            // NOT while the user has scrolled up to read history: their position
+            // is held (a LazyVStack height re-measure must not snap them down).
+            // While streaming we always follow — the answer is the newest thing.
             .onChange(of: contentHeight) { _, _ in
                 guard contentHeight > viewportHeight + 4 else { return }
+                guard chat.phase == .responding || !scrolledUp else { return }
                 proxy.scrollTo("bottom-anchor", anchor: .bottom)
             }
             .onAppear {
