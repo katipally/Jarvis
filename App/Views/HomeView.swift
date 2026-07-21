@@ -156,10 +156,14 @@ struct HomeView: View {
             .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, h in
                 viewportHeight = h
             }
-            // Once the answer overflows the panel (max height reached), follow the
-            // bottom so the newest tokens stay visible; below that it's stationary.
+            // Once the transcript overflows the panel (max height reached), follow
+            // the bottom on ANY content growth so the latest interaction stays
+            // visible — streaming tokens, the plain→Markdown reflow when a turn
+            // settles, and a new prompt/answer appended while already at max height
+            // (the "it just keeps adding off-screen" case). Static content that
+            // isn't growing never moves, so manual scroll-up still works.
             .onChange(of: contentHeight) { _, _ in
-                guard chat.phase == .responding, contentHeight > viewportHeight + 4 else { return }
+                guard contentHeight > viewportHeight + 4 else { return }
                 proxy.scrollTo("bottom-anchor", anchor: .bottom)
             }
             .onAppear {
