@@ -25,6 +25,12 @@ final class NotchScreenManager {
     /// Fires a delayed pointerMoved so a stationary-while-outside pointer still
     /// triggers the close. One pending task at a time.
     private var outsideRecheckTask: Task<Void, Never>?
+
+    /// Moving the pointer off the panel no longer closes it quickly — the panel
+    /// is "sticky, but dismissable" (click outside or Esc closes it now). This
+    /// dwell is just the safety net for "the user walked away entirely".
+    private static let outsideGrace: TimeInterval = 10
+
     private var core: JarvisCore?
     private var chat: ChatStore?
     private var voice: VoiceController?
@@ -125,6 +131,31 @@ final class NotchScreenManager {
             return event
         }) {
             mouseMonitors.append(local)
+        }
+        // Click-away dismiss: a click landing in another app / the desktop
+        // arrives as a GLOBAL mouseDown (clicks inside the panel are local and
+        // never reach this). Closes the panel immediately — the deliberate
+        // counterpart to the long mouse-leave grace.
+        if let clicks = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            Task { @MainActor in self?.pointerClickedOutside() }
+        }) {
+            mouseMonitors.append(clicks)
+        }
+    }
+
+    /// A click outside every open panel's zone dismisses it now (respecting the
+    /// same guards as the hover close — never mid-response, mid-voice, etc.).
+    private func pointerClickedOutside() {
+        let pointer = NSEvent.mouseLocation
+        for (id, panel) in panels where panel.vm.state == .open {
+            // Tighter than the hover zone: a deliberate click just needs to be
+            // clearly off the panel, not the generous "still aiming" margin.
+            let zone = panel.vm.visibleRect(open: true)
+                .union(panel.vm.trayRect(open: true))
+                .insetBy(dx: -8, dy: -8)
+            guard !zone.contains(pointer), canAutoClose(panel) else { continue }
+            outsideSince[id] = nil
+            withAnimation(NotchAnimation.close) { panel.vm.close() }
         }
     }
 
@@ -249,7 +280,7 @@ final class NotchScreenManager {
             let since = outsideSince[id] ?? now
             outsideSince[id] = since
 
-            if now.timeIntervalSince(since) >= 0.45, canAutoClose(panel) {
+            if now.timeIntervalSince(since) >= Self.outsideGrace, canAutoClose(panel) {
                 outsideSince[id] = nil
                 withAnimation(NotchAnimation.close) { panel.vm.close() }
             } else {
